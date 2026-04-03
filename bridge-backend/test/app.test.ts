@@ -3,8 +3,13 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { createApp } from '../src/app.js'
-import { createFileBackedBridgeStore, createInMemoryBridgeStore } from '../src/store.js'
+import { createApp, getConfiguredAllowedOrigins } from '../src/app.js'
+import {
+  createFileBackedBridgeStore,
+  createInMemoryBridgeStore,
+  getAllowedOriginsForLaunchUrl,
+  getConfiguredWeatherAppUrl,
+} from '../src/store.js'
 
 describe('bridge-backend app', () => {
   it('returns health status', async () => {
@@ -19,6 +24,16 @@ describe('bridge-backend app', () => {
       status: 'ok',
       service: 'bridge-backend',
     })
+  })
+
+  it('parses deployment origins and weather app url overrides safely', () => {
+    assert.deepEqual(getConfiguredAllowedOrigins('https://chat.example.com, https://weather.example.com'), [
+      'https://chat.example.com',
+      'https://weather.example.com',
+    ])
+    assert.equal(getConfiguredWeatherAppUrl('https://weather.example.com/app/'), 'https://weather.example.com/app')
+    assert.deepEqual(getAllowedOriginsForLaunchUrl('https://weather.example.com/app'), ['https://weather.example.com'])
+    assert.equal(getConfiguredWeatherAppUrl('not-a-url'), 'http://localhost:4173')
   })
 
   it('returns approved apps for a class from backend-owned allowlist state', async () => {

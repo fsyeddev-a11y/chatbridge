@@ -45,6 +45,14 @@ type RegistryAppResponse = {
 }
 
 const CHATBRIDGE_API_ORIGIN = process.env.CHATBRIDGE_API_ORIGIN || 'http://localhost:8787'
+const CHATBRIDGE_WEATHER_APP_URL = process.env.CHATBRIDGE_WEATHER_APP_URL || 'http://localhost:4173'
+const CHATBRIDGE_WEATHER_APP_ORIGIN = (() => {
+  try {
+    return new URL(CHATBRIDGE_WEATHER_APP_URL).origin
+  } catch {
+    return 'http://localhost:4173'
+  }
+})()
 
 const fallbackRegistry: ChatBridgeAppDefinition[] = [
   {
@@ -81,8 +89,8 @@ const fallbackRegistry: ChatBridgeAppDefinition[] = [
     description: 'Lightweight public weather app for quick lookups and contextual summaries.',
     developerName: 'ChatBridge Demo',
     executionModel: 'iframe',
-    launchUrl: 'http://localhost:4173',
-    allowedOrigins: ['http://localhost:4173'],
+    launchUrl: CHATBRIDGE_WEATHER_APP_URL,
+    allowedOrigins: [CHATBRIDGE_WEATHER_APP_ORIGIN],
     authType: 'none',
     subjectTags: ['Science'],
     gradeBand: 'K-12',

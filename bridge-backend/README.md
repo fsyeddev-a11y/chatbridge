@@ -21,3 +21,7 @@ Default local store path:
 
 Override with:
 - `CHATBRIDGE_STORE_PATH=/custom/path/bridge-store.json`
+
+Deployment-related environment variables:
+- `CHATBRIDGE_ALLOWED_ORIGINS=https://chatbox.example.com,https://weather.example.com`
+- `CHATBRIDGE_WEATHER_APP_URL=https://weather.example.com`

@@ -13,12 +13,28 @@ import { createInMemoryBridgeStore, type BridgeStore } from './store.js'
 
 export type AppOptions = {
   store?: BridgeStore
+  allowedOrigins?: string[]
+}
+
+const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://localhost:4173']
+
+export function getConfiguredAllowedOrigins(envValue = process.env.CHATBRIDGE_ALLOWED_ORIGINS) {
+  if (!envValue) {
+    return DEFAULT_ALLOWED_ORIGINS
+  }
+
+  const origins = envValue
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+
+  return origins.length ? origins : DEFAULT_ALLOWED_ORIGINS
 }
 
 export function createApp(options: AppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false })
   const store = options.store ?? createInMemoryBridgeStore()
-  const allowedOrigins = new Set(['http://localhost:3000', 'http://localhost:4173'])
+  const allowedOrigins = new Set(options.allowedOrigins ?? getConfiguredAllowedOrigins())
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin

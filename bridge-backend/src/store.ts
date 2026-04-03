@@ -28,8 +28,32 @@ export type BridgeStoreData = {
   reviewActions: ReviewAction[]
 }
 
+const DEFAULT_WEATHER_APP_URL = 'http://localhost:4173'
+
+export function getConfiguredWeatherAppUrl(envValue = process.env.CHATBRIDGE_WEATHER_APP_URL) {
+  if (!envValue) {
+    return DEFAULT_WEATHER_APP_URL
+  }
+
+  try {
+    return new URL(envValue).toString().replace(/\/$/, '')
+  } catch {
+    return DEFAULT_WEATHER_APP_URL
+  }
+}
+
+export function getAllowedOriginsForLaunchUrl(launchUrl: string) {
+  try {
+    return [new URL(launchUrl).origin]
+  } catch {
+    return [new URL(DEFAULT_WEATHER_APP_URL).origin]
+  }
+}
+
 function createSeedData(): BridgeStoreData {
   const now = Date.now()
+  const weatherAppUrl = getConfiguredWeatherAppUrl()
+  const weatherAllowedOrigins = getAllowedOriginsForLaunchUrl(weatherAppUrl)
 
   const registryEntries: AppRegistryEntry[] = [
     {
@@ -71,8 +95,8 @@ function createSeedData(): BridgeStoreData {
         description: 'Lightweight public weather app for quick lookups.',
         developerName: 'ChatBridge Demo',
         executionModel: 'iframe',
-        launchUrl: 'http://localhost:4173',
-        allowedOrigins: ['http://localhost:4173'],
+        launchUrl: weatherAppUrl,
+        allowedOrigins: weatherAllowedOrigins,
         heartbeatTimeoutMs: 10000,
         authType: 'none',
         subjectTags: ['Science'],
@@ -288,6 +312,9 @@ function writeSeedFile(filePath: string): BridgeStoreData {
 }
 
 function migrateStoreData(data: BridgeStoreData): BridgeStoreData {
+  const weatherAppUrl = getConfiguredWeatherAppUrl()
+  const weatherAllowedOrigins = getAllowedOriginsForLaunchUrl(weatherAppUrl)
+
   return {
     ...data,
     registryEntries: data.registryEntries.map((entry) => {
@@ -299,11 +326,11 @@ function migrateStoreData(data: BridgeStoreData): BridgeStoreData {
         ...entry,
         manifest: {
           ...entry.manifest,
-          launchUrl: entry.manifest.launchUrl || 'http://localhost:4173',
+          launchUrl: entry.manifest.launchUrl || weatherAppUrl,
           allowedOrigins:
             entry.manifest.allowedOrigins?.length && !entry.manifest.allowedOrigins.includes('https://apps.chatbridge.local')
               ? entry.manifest.allowedOrigins
-              : ['http://localhost:4173'],
+              : weatherAllowedOrigins,
           heartbeatTimeoutMs: entry.manifest.heartbeatTimeoutMs || 10000,
         },
       }
