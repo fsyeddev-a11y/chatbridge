@@ -5,11 +5,16 @@ import Markdown from '@/components/Markdown'
 import { trackingEvent } from '@/packages/event'
 import platform from '@/platform'
 import { settingsStore } from '@/stores/settingsStore'
+import { DISABLE_CHATBOX_CLOUD } from '@/variables'
 import * as remote from '../packages/remote'
 
 const { useEffect, useState } = React
 
 export default function RemoteDialogWindow() {
+  if (DISABLE_CHATBOX_CLOUD) {
+    return null
+  }
+
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [dialogConfig, setDialogConfig] = useState<remote.DialogConfig | null>(null)

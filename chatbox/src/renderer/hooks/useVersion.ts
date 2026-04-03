@@ -3,7 +3,7 @@ import dayjs from 'dayjs'
 import { useAtomValue } from 'jotai'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { remoteConfigAtom } from '@/stores/atoms'
-import { CHATBOX_BUILD_PLATFORM } from '@/variables'
+import { CHATBOX_BUILD_PLATFORM, DISABLE_CHATBOX_CLOUD } from '@/variables'
 import * as remote from '../packages/remote'
 import platform from '../platform'
 
@@ -43,6 +43,11 @@ export default function useVersion() {
   )
   const updateCheckTimer = useRef<NodeJS.Timeout>()
   useEffect(() => {
+    if (DISABLE_CHATBOX_CLOUD) {
+      setNeedCheckUpdate(false)
+      return
+    }
+
     const handler = async () => {
       const config = await platform.getConfig()
       const settings = await platform.getSettings()
