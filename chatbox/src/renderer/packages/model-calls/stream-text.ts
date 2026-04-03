@@ -8,6 +8,7 @@ import { uniqueId } from 'lodash'
 import { createModelDependencies } from '@/adapters'
 import * as settingActions from '@/stores/settingActions'
 import { settingsStore } from '@/stores/settingsStore'
+import { emitChatBridgeEvent } from '@/packages/chatbridge/observability'
 import type {
   ModelInterface,
   OnResultChange,
@@ -34,6 +35,7 @@ import {
   searchByPromptEngineering,
 } from './tools'
 import fileToolSet from './toolsets/file'
+import { getChatBridgeToolSet } from './toolsets/chatbridge'
 import { getToolSet } from './toolsets/knowledge-base'
 import websearchToolSet, { parseLinkTool, webSearchTool } from './toolsets/web-search'
 
@@ -137,6 +139,7 @@ export async function streamText(
 ): Promise<{ result: StreamTextResult; coreMessages: ModelMessage[] }> {
   const { knowledgeBase, webBrowsing, sessionId } = params
   const hasFileOrLink = params.messages.some((m) => m.files?.length || m.links?.length)
+  const traceId = `chatbridge-trace-${uniqueId()}`
 
   const controller = new AbortController()
   const cancel = () => controller.abort()
@@ -158,6 +161,7 @@ export async function streamText(
   let toolSetInstructions = ''
   // 预加载知识库工具集（异步获取文件列表）
   let kbToolSet = null
+  let chatBridgeToolSet = null
   if (knowledgeBase) {
     try {
       kbToolSet = await getToolSet(knowledgeBase.id, knowledgeBase.name)
@@ -165,8 +169,18 @@ export async function streamText(
       console.error('Failed to load knowledge base toolset:', err)
     }
   }
+  if (sessionId) {
+    try {
+      chatBridgeToolSet = await getChatBridgeToolSet(sessionId, { traceId })
+    } catch (err) {
+      console.error('Failed to load ChatBridge toolset:', err)
+    }
+  }
   if (kbToolSet && !kbNotSupported) {
     toolSetInstructions += kbToolSet.description
+  }
+  if (chatBridgeToolSet) {
+    toolSetInstructions += chatBridgeToolSet.description
   }
   if (needFileToolSet) {
     toolSetInstructions += fileToolSet.description
@@ -191,6 +205,15 @@ export async function streamText(
   const messages = sequenceMessages(params.messages)
   const infoParts: MessageInfoPart[] = []
   try {
+    emitChatBridgeEvent({
+      name: 'GenerationStarted',
+      payload: {
+        traceId,
+        sessionId,
+        classId: chatBridgeToolSet?.activeClassId,
+        model: model.modelId,
+      },
+    })
     params.onResultChangeWithCancel({ cancel }) // 这里先传递 cancel 方法
     const onResultChange: OnResultChange = (data) => {
       if (data.contentParts) {
@@ -309,12 +332,30 @@ export async function streamText(
       }
     }
 
+    if (chatBridgeToolSet) {
+      tools = {
+        ...tools,
+        ...chatBridgeToolSet.tools,
+      }
+    }
+
     if (needFileToolSet) {
       tools = {
         ...tools,
         ...fileToolSet.tools,
       }
     }
+
+    emitChatBridgeEvent({
+      name: 'ToolsetAssembled',
+      payload: {
+        traceId,
+        sessionId,
+        activeAppId: chatBridgeToolSet?.activeAppId,
+        availableToolNames: Object.keys(tools),
+        model: model.modelId,
+      },
+    })
 
     console.debug('tools', tools)
 
@@ -325,6 +366,22 @@ export async function streamText(
       onStatusChange: params.onStatusChange,
       providerOptions: params.providerOptions,
       tools,
+    })
+
+    const invokedToolNames = result.contentParts
+      .filter((part): part is Extract<(typeof result.contentParts)[number], { type: 'tool-call' }> => part.type === 'tool-call')
+      .map((part) => part.toolName)
+
+    emitChatBridgeEvent({
+      name: 'GenerationCompleted',
+      payload: {
+        traceId,
+        sessionId,
+        activeAppId: chatBridgeToolSet?.activeAppId,
+        model: model.modelId,
+        finishReason: result.finishReason,
+        invokedToolNames: Array.from(new Set(invokedToolNames)),
+      },
     })
 
     return { result, coreMessages }

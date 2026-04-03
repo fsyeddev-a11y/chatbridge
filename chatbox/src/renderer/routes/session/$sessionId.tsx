@@ -9,6 +9,8 @@ import MessageList, { type MessageListRef } from '@/components/chat/MessageList'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import InputBox from '@/components/InputBox/InputBox'
 import Header from '@/components/layout/Header'
+import ChatBridgePanel from '@/components/session/ChatBridgePanel'
+import ChatBridgeShelf from '@/components/session/ChatBridgeShelf'
 import ThreadHistoryDrawer from '@/components/session/ThreadHistoryDrawer'
 import { updateSession as updateSessionStore, useSession } from '@/stores/chatStore'
 import { lastUsedModelStore } from '@/stores/lastUsedModelStore'
@@ -153,9 +155,16 @@ function RouteComponent() {
   return currentSession ? (
     <div className="flex flex-col h-full">
       <Header session={currentSession} />
+      <ChatBridgeShelf session={currentSession} />
+      <ChatBridgePanel session={currentSession} />
 
       {/* MessageList 设置 key，确保每个 session 对应新的 MessageList 实例 */}
-      <MessageList ref={messageListRef} key={`message-list${currentSessionId}`} currentSession={currentSession} />
+      <MessageList
+        ref={messageListRef}
+        key={`message-list${currentSessionId}`}
+        currentSession={currentSession}
+        className="flex-1 min-h-0"
+      />
 
       {/* <ScrollButtons /> */}
       <ErrorBoundary name="session-inputbox">

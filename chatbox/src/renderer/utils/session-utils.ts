@@ -3,8 +3,17 @@ import { mapValues } from 'lodash'
 import { migrateMessage } from '../../shared/utils/message'
 
 export function migrateSession(session: Session): Session {
+  const bridgeState = session.bridgeState
+    ? {
+        ...session.bridgeState,
+        activeClassId: session.bridgeState.activeClassId || 'demo-class',
+        appContext: session.bridgeState.appContext || {},
+      }
+    : undefined
+
   return {
     ...session,
+    bridgeState,
     settings: {
       // temperature未设置的时候使用默认值undefined，这样才能覆盖全局设置
       temperature: undefined,

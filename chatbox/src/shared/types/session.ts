@@ -246,6 +246,48 @@ export const SessionThreadSchema = z.object({
   compactionPoints: z.array(CompactionPointSchema).optional(),
 })
 
+export const BridgeAppAuthTypeSchema = z.enum(['none', 'api-key', 'oauth2'])
+
+export const BridgeAppRuntimeStatusSchema = z.enum(['idle', 'ready', 'active', 'error', 'complete'])
+
+export const BridgeToolManifestSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  parameters: z.record(z.string(), z.unknown()).optional(),
+  returns: z.record(z.string(), z.unknown()).optional(),
+})
+
+export const BridgeAppManifestSchema = z.object({
+  appId: z.string(),
+  name: z.string(),
+  description: z.string(),
+  developerName: z.string(),
+  executionModel: z.enum(['iframe', 'server-side']),
+  launchUrl: z.string().optional(),
+  allowedOrigins: z.array(z.string()).default([]),
+  authType: BridgeAppAuthTypeSchema,
+  subjectTags: z.array(z.string()).default([]),
+  gradeBand: z.string().optional(),
+  llmSafeFields: z.array(z.string()).default([]),
+  llmSummaryTemplate: z.string().optional(),
+  tools: z.array(BridgeToolManifestSchema).default([]),
+})
+
+export const BridgeAppContextSchema = z.object({
+  appId: z.string(),
+  status: BridgeAppRuntimeStatusSchema.default('idle'),
+  summary: z.string().optional(),
+  lastEventAt: z.number().optional(),
+  lastState: z.record(z.string(), z.unknown()).optional(),
+  lastError: z.string().optional(),
+})
+
+export const SessionBridgeStateSchema = z.object({
+  activeAppId: z.string().optional(),
+  activeClassId: z.string().default('demo-class'),
+  appContext: z.record(z.string(), BridgeAppContextSchema).default({}),
+})
+
 export const SessionSchema = z.object({
   id: z.string(),
   type: SessionTypeSchema.optional(),
@@ -261,6 +303,7 @@ export const SessionSchema = z.object({
   threadName: z.string().optional(),
   messageForksHash: z.record(z.string(), MessageForkSchema).optional(),
   compactionPoints: z.array(CompactionPointSchema).optional(),
+  bridgeState: SessionBridgeStateSchema.optional(),
 })
 
 export const SessionMetaSchema = SessionSchema.pick({
@@ -304,6 +347,12 @@ export type MessageStatus = z.infer<typeof MessageStatusSchema>
 export type Message = z.infer<typeof MessageSchema>
 export type SessionType = z.infer<typeof SessionTypeSchema>
 export type CompactionPoint = z.infer<typeof CompactionPointSchema>
+export type BridgeAppAuthType = z.infer<typeof BridgeAppAuthTypeSchema>
+export type BridgeAppRuntimeStatus = z.infer<typeof BridgeAppRuntimeStatusSchema>
+export type BridgeToolManifest = z.infer<typeof BridgeToolManifestSchema>
+export type BridgeAppManifest = z.infer<typeof BridgeAppManifestSchema>
+export type BridgeAppContext = z.infer<typeof BridgeAppContextSchema>
+export type SessionBridgeState = z.infer<typeof SessionBridgeStateSchema>
 export type Session = z.infer<typeof SessionSchema>
 export type SessionMeta = z.infer<typeof SessionMetaSchema>
 export type SessionThread = z.infer<typeof SessionThreadSchema>
