@@ -1,6 +1,8 @@
 import { getLogger } from '@/lib/utils'
+import { getStandaloneModelManifest, getStandaloneRemoteConfigValue } from '@/packages/chatbox-cloud'
 import platform from '@/platform'
 import { authInfoStore } from '@/stores/authInfoStore'
+import { DISABLE_CHATBOX_CLOUD } from '@/variables'
 import { USE_BETA_API, USE_BETA_CHATBOX, USE_LOCAL_API, USE_LOCAL_CHATBOX } from '@/variables'
 import { ofetch } from 'ofetch'
 import { z } from 'zod'
@@ -160,6 +162,10 @@ export async function checkNeedUpdate(version: string, os: string, config: Confi
 // }
 
 export async function listCopilots(lang: string) {
+  if (DISABLE_CHATBOX_CLOUD) {
+    return []
+  }
+
   type Response = {
     data: CopilotDetail[]
   }
@@ -195,6 +201,10 @@ export async function getPremiumPrice() {
 }
 
 export async function getRemoteConfig(config: keyof RemoteConfig) {
+  if (DISABLE_CHATBOX_CLOUD) {
+    return getStandaloneRemoteConfigValue(config)
+  }
+
   type Response = {
     data: Pick<RemoteConfig, typeof config>
   }
@@ -539,6 +549,10 @@ const ModelManifestResponseSchema = z.object({
 })
 
 export async function getModelManifest(params: { aiProvider: ModelProvider; licenseKey?: string; language?: string }) {
+  if (DISABLE_CHATBOX_CLOUD) {
+    return getStandaloneModelManifest()
+  }
+
   const afetch = await getAfetch()
   const res = await afetch(
     `${getAPIOrigin()}/api/model_manifest`,
@@ -585,6 +599,10 @@ const ProviderInfoResponseSchema = z.object({
 })
 
 export async function getProviderModelsInfo(params: { modelIds: string[] }) {
+  if (DISABLE_CHATBOX_CLOUD) {
+    return {}
+  }
+
   const afetch = await getAfetch()
   const res = await afetch(
     `${getAPIOrigin()}/api/provider_models_info`,

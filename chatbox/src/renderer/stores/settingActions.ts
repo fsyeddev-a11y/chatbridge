@@ -1,9 +1,19 @@
 import { ModelProviderEnum } from '@shared/types'
 import { getDefaultStore } from 'jotai'
+import { shouldSkipProviderSetup as shouldSkipProviderSetupForMode } from '@/packages/chatbox-cloud'
+import { DISABLE_CHATBOX_CLOUD } from '@/variables'
 import * as atoms from './atoms'
 import { settingsStore } from './settingsStore'
 
+export function shouldSkipProviderSetup(disableChatboxCloud = DISABLE_CHATBOX_CLOUD) {
+  return shouldSkipProviderSetupForMode(disableChatboxCloud)
+}
+
 export function needEditSetting() {
+  if (shouldSkipProviderSetup()) {
+    return false
+  }
+
   const settings = settingsStore.getState()
 
   // 激活了chatbox ai

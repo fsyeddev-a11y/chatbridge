@@ -17,3 +17,7 @@ export const USE_LOCAL_CHATBOX = process.env.USE_LOCAL_CHATBOX || ''
 export const USE_BETA_CHATBOX = process.env.USE_BETA_CHATBOX || ''
 
 export const NODE_ENV = process.env.NODE_ENV || 'development'
+
+export const DISABLE_CHATBOX_CLOUD =
+  process.env.CHATBRIDGE_DISABLE_CHATBOX_CLOUD === 'true' ||
+  (process.env.CHATBRIDGE_DISABLE_CHATBOX_CLOUD !== 'false' && CHATBOX_BUILD_PLATFORM === 'web')
