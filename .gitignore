@@ -1,1 +1,4 @@
 .DS_Store
+bridge-backend/node_modules/
+bridge-backend/dist/
+bridge-backend/test/*.js
