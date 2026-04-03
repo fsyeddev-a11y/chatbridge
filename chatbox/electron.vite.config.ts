@@ -149,6 +149,13 @@ export default defineConfig(({ mode }) => {
       'process.env.CHATBOX_BUILD_PLATFORM': JSON.stringify(process.env.CHATBOX_BUILD_PLATFORM || 'unknown'),
       'process.env.USE_LOCAL_API': JSON.stringify(process.env.USE_LOCAL_API || ''),
       'process.env.USE_BETA_API': JSON.stringify(process.env.USE_BETA_API || ''),
+      'process.env.CHATBRIDGE_API_ORIGIN': JSON.stringify(process.env.CHATBRIDGE_API_ORIGIN || ''),
+      'process.env.CHATBRIDGE_WEATHER_APP_URL': JSON.stringify(process.env.CHATBRIDGE_WEATHER_APP_URL || ''),
+      'process.env.CHATBRIDGE_DISABLE_CHATBOX_CLOUD': JSON.stringify(
+        process.env.CHATBRIDGE_DISABLE_CHATBOX_CLOUD || ''
+      ),
+      'process.env.SUPABASE_URL': JSON.stringify(process.env.SUPABASE_URL || ''),
+      'process.env.SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY || ''),
     },
     optimizeDeps: {
       include: ['mermaid'],
