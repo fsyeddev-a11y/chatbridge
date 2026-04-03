@@ -25,3 +25,7 @@ export function getStandaloneModelManifest() {
 export function shouldSkipProviderSetup(disableChatboxCloud: boolean) {
   return disableChatboxCloud
 }
+
+export function shouldSkipChatboxCloudRequests(disableChatboxCloud: boolean) {
+  return disableChatboxCloud
+}

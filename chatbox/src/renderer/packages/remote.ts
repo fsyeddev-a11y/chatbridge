@@ -1,5 +1,9 @@
 import { getLogger } from '@/lib/utils'
-import { getStandaloneModelManifest, getStandaloneRemoteConfigValue } from '@/packages/chatbox-cloud'
+import {
+  getStandaloneModelManifest,
+  getStandaloneRemoteConfigValue,
+  shouldSkipChatboxCloudRequests,
+} from '@/packages/chatbox-cloud'
 import platform from '@/platform'
 import { authInfoStore } from '@/stores/authInfoStore'
 import { DISABLE_CHATBOX_CLOUD } from '@/variables'
@@ -123,6 +127,10 @@ const getChatboxHeaders = async () => {
 // ========== 各个接口方法 ==========
 
 export async function checkNeedUpdate(version: string, os: string, config: Config, settings: Settings) {
+  if (shouldSkipChatboxCloudRequests(DISABLE_CHATBOX_CLOUD)) {
+    return false
+  }
+
   type Response = {
     need_update?: boolean
   }
@@ -221,6 +229,10 @@ export interface DialogConfig {
 }
 
 export async function getDialogConfig(params: { uuid: string; language: string; version: string }) {
+  if (shouldSkipChatboxCloudRequests(DISABLE_CHATBOX_CLOUD)) {
+    return null
+  }
+
   type Response = {
     data: null | DialogConfig
   }

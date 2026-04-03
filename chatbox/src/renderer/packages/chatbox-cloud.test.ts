@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   getStandaloneModelManifest,
   getStandaloneRemoteConfigValue,
+  shouldSkipChatboxCloudRequests,
   shouldSkipProviderSetup,
 } from '@/packages/chatbox-cloud'
 
@@ -25,5 +26,10 @@ describe('chatbox cloud standalone fallbacks', () => {
   it('skips provider setup when standalone mode is enabled', () => {
     expect(shouldSkipProviderSetup(true)).toBe(true)
     expect(shouldSkipProviderSetup(false)).toBe(false)
+  })
+
+  it('skips optional Chatbox cloud requests in standalone mode', () => {
+    expect(shouldSkipChatboxCloudRequests(true)).toBe(true)
+    expect(shouldSkipChatboxCloudRequests(false)).toBe(false)
   })
 })
