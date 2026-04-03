@@ -1,4 +1,3 @@
-import { Alert, Button, Paper, PasswordInput, Stack, Text, TextInput, Title } from '@mantine/core'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/packages/supabase'
 
@@ -78,7 +77,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <Text c="dimmed">Loading TutorMeAI...</Text>
+        <p className="text-sm text-gray-500">Loading TutorMeAI...</p>
       </div>
     )
   }
@@ -89,38 +88,54 @@ export default function AuthGate({ children }: AuthGateProps) {
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
-      <Paper withBorder radius="lg" p="xl" maw={420} w="100%">
-        <Stack gap="md">
+      <div className="w-full max-w-[420px] rounded-2xl border border-white/10 bg-[#1f1f23] p-8 shadow-xl">
+        <div className="space-y-5">
           <div>
-            <Title order={2}>TutorMeAI Sign In</Title>
-            <Text c="dimmed" size="sm" mt={4}>
+            <h1 className="text-2xl font-semibold text-white">TutorMeAI Sign In</h1>
+            <p className="mt-2 text-sm text-gray-400">
               Sign in with the shared internal testing account to access ChatBridge.
-            </Text>
+            </p>
           </div>
 
-          {error ? (
-            <Alert color="red" variant="light">
-              {error}
-            </Alert>
-          ) : null}
+          {error ? <div className="rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</div> : null}
 
-          <TextInput label="Email" value={email} onChange={(event) => setEmail(event.currentTarget.value)} />
-          <PasswordInput
-            label="Password"
-            value={password}
-            onChange={(event) => setPassword(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !submitting) {
-                void handleLogin()
-              }
-            }}
-          />
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-gray-200">Email</span>
+            <input
+              type="email"
+              autoComplete="email"
+              className="w-full rounded-xl border border-white/10 bg-[#121216] px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
+              value={email}
+              onChange={(event) => setEmail(event.currentTarget.value)}
+            />
+          </label>
 
-          <Button onClick={() => void handleLogin()} loading={submitting} fullWidth>
-            Sign In
-          </Button>
-        </Stack>
-      </Paper>
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-gray-200">Password</span>
+            <input
+              type="password"
+              autoComplete="current-password"
+              className="w-full rounded-xl border border-white/10 bg-[#121216] px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
+              value={password}
+              onChange={(event) => setPassword(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !submitting) {
+                  void handleLogin()
+                }
+              }}
+            />
+          </label>
+
+          <button
+            type="button"
+            className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => void handleLogin()}
+            disabled={submitting}
+          >
+            {submitting ? 'Signing In...' : 'Sign In'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
