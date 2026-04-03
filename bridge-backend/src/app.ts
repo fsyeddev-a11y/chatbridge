@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import { ZodError } from 'zod'
+import { createSupabaseAuthVerifier, getBearerToken, type AuthVerifier } from './auth.js'
 import {
   AppIdParamsSchema,
   AppManifestSchema,
@@ -14,6 +15,7 @@ import { createInMemoryBridgeStore, type BridgeStore } from './store.js'
 export type AppOptions = {
   store?: BridgeStore
   allowedOrigins?: string[]
+  authVerifier?: AuthVerifier
 }
 
 const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://localhost:4173']
@@ -35,6 +37,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false })
   const store = options.store ?? createInMemoryBridgeStore()
   const allowedOrigins = new Set(options.allowedOrigins ?? getConfiguredAllowedOrigins())
+  const authVerifier = options.authVerifier ?? createSupabaseAuthVerifier()
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin
@@ -42,12 +45,32 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       reply.header('Access-Control-Allow-Origin', origin)
       reply.header('Vary', 'Origin')
       reply.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
-      reply.header('Access-Control-Allow-Headers', 'Content-Type')
+      reply.header('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     }
 
     if (request.method === 'OPTIONS') {
       return reply.status(204).send()
     }
+
+    if (!request.url.startsWith('/api/')) {
+      return
+    }
+
+    const token = getBearerToken(request.headers.authorization)
+    if (!token) {
+      return reply.status(401).send({
+        error: 'unauthorized',
+      })
+    }
+
+    const user = await authVerifier(token)
+    if (!user) {
+      return reply.status(401).send({
+        error: 'unauthorized',
+      })
+    }
+
+    request.headers['x-chatbridge-user-id'] = user.id
   })
 
   app.setErrorHandler((error, _request, reply) => {

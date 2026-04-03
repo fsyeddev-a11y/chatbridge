@@ -12,6 +12,11 @@ import {
 } from '../src/store.js'
 
 describe('bridge-backend app', () => {
+  const allowAllAuth = async () => ({
+    id: 'user-1',
+    email: 'tester@example.com',
+  })
+
   it('returns health status', async () => {
     const app = createApp({ store: createInMemoryBridgeStore() })
     const response = await app.inject({
@@ -37,10 +42,13 @@ describe('bridge-backend app', () => {
   })
 
   it('returns approved apps for a class from backend-owned allowlist state', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore() })
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
     const response = await app.inject({
       method: 'GET',
       url: '/api/classes/demo-class/apps',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
     })
 
     assert.equal(response.statusCode, 200)
@@ -53,12 +61,13 @@ describe('bridge-backend app', () => {
   })
 
   it('accepts structured audit events', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore() })
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
     const response = await app.inject({
       method: 'POST',
       url: '/api/audit/events',
       headers: {
         origin: 'http://localhost:3000',
+        authorization: 'Bearer token-1',
       },
       payload: {
         timestamp: Date.now(),
@@ -79,12 +88,13 @@ describe('bridge-backend app', () => {
   })
 
   it('rejects invalid audit events', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore() })
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
     const response = await app.inject({
       method: 'POST',
       url: '/api/audit/events',
       headers: {
         origin: 'http://localhost:3000',
+        authorization: 'Bearer token-1',
       },
       payload: {
         source: 'frontend',
@@ -110,7 +120,20 @@ describe('bridge-backend app', () => {
     assert.equal(response.statusCode, 204)
     assert.equal(response.headers['access-control-allow-origin'], 'http://localhost:3000')
     assert.equal(response.headers['access-control-allow-methods'], 'GET,POST,OPTIONS')
-    assert.equal(response.headers['access-control-allow-headers'], 'Content-Type')
+    assert.equal(response.headers['access-control-allow-headers'], 'Content-Type,Authorization')
+  })
+
+  it('rejects unauthenticated api requests', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/registry/apps',
+    })
+
+    assert.equal(response.statusCode, 401)
+    assert.deepEqual(response.json(), {
+      error: 'unauthorized',
+    })
   })
 
   it('persists seeded store data and appended audit events to disk', async () => {
@@ -190,10 +213,13 @@ describe('bridge-backend app', () => {
   })
 
   it('registers a new app manifest as pending review', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore() })
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
     const response = await app.inject({
       method: 'POST',
       url: '/api/registry/apps',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
       payload: {
         appId: 'story-builder',
         name: 'AI Story Builder',
@@ -221,11 +247,14 @@ describe('bridge-backend app', () => {
 
   it('updates review state and exposes review actions', async () => {
     const store = createInMemoryBridgeStore()
-    const app = createApp({ store })
+    const app = createApp({ store, authVerifier: allowAllAuth })
 
     const reviewResponse = await app.inject({
       method: 'POST',
       url: '/api/registry/apps/chess/review',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
       payload: {
         reviewState: 'suspended',
         reviewerId: 'admin-1',
@@ -239,6 +268,9 @@ describe('bridge-backend app', () => {
     const actionsResponse = await app.inject({
       method: 'GET',
       url: '/api/review-actions',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
     })
 
     assert.equal(actionsResponse.statusCode, 200)
@@ -247,11 +279,14 @@ describe('bridge-backend app', () => {
   })
 
   it('enables and disables apps per class through the allowlist API', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore() })
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
 
     const enableResponse = await app.inject({
       method: 'POST',
       url: '/api/classes/algebra-1/allowlist',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
       payload: {
         appId: 'chess',
         enabledBy: 'teacher-1',
@@ -265,6 +300,9 @@ describe('bridge-backend app', () => {
     const disableResponse = await app.inject({
       method: 'POST',
       url: '/api/classes/algebra-1/allowlist/chess/disable',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
       payload: {
         enabledBy: 'teacher-1',
       },
@@ -275,11 +313,14 @@ describe('bridge-backend app', () => {
   })
 
   it('rejects allowlist enables for apps that are missing or not platform-approved', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore() })
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
 
     const missingAppResponse = await app.inject({
       method: 'POST',
       url: '/api/classes/algebra-1/allowlist',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
       payload: {
         appId: 'unknown-app',
         enabledBy: 'teacher-1',
@@ -294,6 +335,9 @@ describe('bridge-backend app', () => {
     const registerPendingResponse = await app.inject({
       method: 'POST',
       url: '/api/registry/apps',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
       payload: {
         appId: 'story-builder',
         name: 'AI Story Builder',
@@ -320,6 +364,9 @@ describe('bridge-backend app', () => {
     const pendingAppEnableResponse = await app.inject({
       method: 'POST',
       url: '/api/classes/algebra-1/allowlist',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
       payload: {
         appId: 'story-builder',
         enabledBy: 'teacher-1',

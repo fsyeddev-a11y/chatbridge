@@ -1,4 +1,5 @@
 import { trackEvent } from '@/utils/track'
+import { getSupabaseAuthHeaders } from '@/packages/supabase'
 
 type ChatBridgeEventName =
   | 'GenerationStarted'
@@ -50,23 +51,28 @@ export function emitChatBridgeEvent(event: ChatBridgeEvent) {
   const safePayload = sanitizeEventPayload(event.payload)
   trackEvent(`chatbridge_${event.name}`, safePayload)
 
-  void fetch(`${CHATBRIDGE_API_ORIGIN}/api/audit/events`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      timestamp: Date.now(),
-      traceId: event.payload.traceId,
-      eventType: event.name,
-      source: 'frontend',
-      sessionId: event.payload.sessionId,
-      classId: event.payload.classId,
-      appId: event.payload.appId,
-      summary: event.payload.reason || event.payload.error,
-      metadata: safePayload,
-    }),
-  }).catch((error) => {
-    console.warn('Failed to send ChatBridge audit event', error)
-  })
+  void getSupabaseAuthHeaders()
+    .then((authHeaders) =>
+      fetch(`${CHATBRIDGE_API_ORIGIN}/api/audit/events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          timestamp: Date.now(),
+          traceId: event.payload.traceId,
+          eventType: event.name,
+          source: 'frontend',
+          sessionId: event.payload.sessionId,
+          classId: event.payload.classId,
+          appId: event.payload.appId,
+          summary: event.payload.reason || event.payload.error,
+          metadata: safePayload,
+        }),
+      })
+    )
+    .catch((error) => {
+      console.warn('Failed to send ChatBridge audit event', error)
+    })
 }

@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import queryClient from '@/stores/queryClient'
 
+const { getSupabaseAuthHeadersMock } = vi.hoisted(() => ({
+  getSupabaseAuthHeadersMock: vi.fn(),
+}))
+
+vi.mock('@/packages/supabase', () => ({
+  getSupabaseAuthHeaders: getSupabaseAuthHeadersMock,
+}))
+
 import {
   disableChatBridgeAppForClass,
   enableChatBridgeAppForClass,
@@ -19,6 +27,9 @@ describe('ChatBridge registry backend client', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', fetchMock)
     invalidateQueriesSpy = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue()
+    getSupabaseAuthHeadersMock.mockResolvedValue({
+      Authorization: 'Bearer token-1',
+    })
   })
 
   afterEach(() => {
@@ -242,7 +253,10 @@ describe('ChatBridge registry backend client', () => {
       'http://localhost:8787/api/registry/apps',
       expect.objectContaining({
         method: 'POST',
-      })
+        headers: expect.objectContaining({
+          Authorization: 'Bearer token-1',
+        }),
+      }),
     )
     expect(app).toEqual(
       expect.objectContaining({
@@ -251,6 +265,26 @@ describe('ChatBridge registry backend client', () => {
       })
     )
     expect(invalidateQueriesSpy).toHaveBeenCalledWith({ queryKey: ['chatbridge'] })
+  })
+
+  it('includes the Supabase bearer token on authenticated GET requests', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        apps: [],
+      }),
+    })
+
+    await fetchChatBridgeApps()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8787/api/registry/apps',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer token-1',
+        }),
+      })
+    )
   })
 
   it('reviews apps and invalidates class-scoped queries when class allowlist changes', async () => {

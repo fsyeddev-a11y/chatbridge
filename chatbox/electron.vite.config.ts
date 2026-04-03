@@ -56,6 +56,114 @@ export default defineConfig(({ mode }) => {
   const isProduction = mode === 'production'
   const isWeb = process.env.CHATBOX_BUILD_PLATFORM === 'web'
 
+  const rendererConfig = {
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, 'src/renderer'),
+        '@shared': path.resolve(__dirname, 'src/shared'),
+      },
+    },
+    plugins: [
+      TanStackRouterVite({
+        target: 'react',
+        autoCodeSplitting: true,
+        routesDirectory: './src/renderer/routes',
+        generatedRouteTree: './src/renderer/routeTree.gen.ts',
+      }),
+      react({}),
+      dvhToVh(),
+      isWeb ? injectBaseTag() : undefined,
+      visualizer({
+        filename: 'release/app/dist/renderer/stats.html',
+        open: false,
+        title: 'Renderer Process Dependency Analysis',
+      }),
+      process.env.SENTRY_AUTH_TOKEN
+        ? sentryVitePlugin({
+            authToken: process.env.SENTRY_AUTH_TOKEN,
+            org: 'sentry',
+            project: 'chatbox',
+            url: 'https://sentry.midway.run/',
+            release: {
+              name: inferredRelease,
+              ...(inferredDist ? { dist: inferredDist } : {}),
+            },
+            sourcemaps: {
+              assets: isProduction ? 'release/app/dist/renderer/**' : 'output/renderer/**',
+            },
+            telemetry: false,
+          })
+        : undefined,
+    ].filter(Boolean),
+    build: {
+      outDir: isProduction ? 'release/app/dist/renderer' : undefined,
+      target: 'es2020',
+      sourcemap: isProduction ? 'hidden' : true,
+      minify: isProduction ? 'esbuild' : false,
+      rollupOptions: {
+        output: {
+          entryFileNames: 'js/[name].[hash].js',
+          chunkFileNames: 'js/[name].[hash].js',
+          assetFileNames: (assetInfo) => {
+            if (assetInfo.name?.endsWith('.css')) {
+              return 'styles/[name].[hash][extname]'
+            }
+            if (/\.(woff|woff2|eot|ttf|otf)$/i.test(assetInfo.name || '')) {
+              return 'fonts/[name].[hash][extname]'
+            }
+            if (/\.(png|jpg|jpeg|gif|svg|webp|ico)$/i.test(assetInfo.name || '')) {
+              return 'images/[name].[hash][extname]'
+            }
+            return 'assets/[name].[hash][extname]'
+          },
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('@ai-sdk') || id.includes('ai/')) {
+                return 'vendor-ai'
+              }
+              if (id.includes('@mantine') || id.includes('@tabler')) {
+                return 'vendor-ui'
+              }
+              if (id.includes('mermaid') || id.includes('d3')) {
+                return 'vendor-charts'
+              }
+            }
+          },
+        },
+      },
+    },
+    css: {
+      modules: {
+        generateScopedName: '[name]__[local]___[hash:base64:5]',
+      },
+      postcss: './postcss.config.cjs',
+    },
+    server: {
+      port: 1212,
+      strictPort: true,
+    },
+    define: {
+      'process.type': '"renderer"',
+      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development'),
+      'process.env.CHATBOX_BUILD_TARGET': JSON.stringify(process.env.CHATBOX_BUILD_TARGET || 'unknown'),
+      'process.env.CHATBOX_BUILD_PLATFORM': JSON.stringify(process.env.CHATBOX_BUILD_PLATFORM || 'unknown'),
+      'process.env.USE_LOCAL_API': JSON.stringify(process.env.USE_LOCAL_API || ''),
+      'process.env.USE_BETA_API': JSON.stringify(process.env.USE_BETA_API || ''),
+    },
+    optimizeDeps: {
+      include: ['mermaid'],
+      esbuildOptions: {
+        target: 'es2015',
+      },
+    },
+  }
+
+  if (isWeb) {
+    return {
+      renderer: rendererConfig,
+    }
+  }
+
   return {
     main: {
       plugins: [
@@ -138,108 +246,6 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
-    renderer: {
-      resolve: {
-        alias: {
-          '@': path.resolve(__dirname, 'src/renderer'),
-          '@shared': path.resolve(__dirname, 'src/shared'),
-        },
-      },
-      plugins: [
-        TanStackRouterVite({
-          target: 'react',
-          autoCodeSplitting: true,
-          routesDirectory: './src/renderer/routes',
-          generatedRouteTree: './src/renderer/routeTree.gen.ts',
-        }),
-        react({}),
-        dvhToVh(),
-        isWeb ? injectBaseTag() : undefined,
-        visualizer({
-          filename: 'release/app/dist/renderer/stats.html',
-          open: false,
-          title: 'Renderer Process Dependency Analysis',
-        }),
-        process.env.SENTRY_AUTH_TOKEN
-          ? sentryVitePlugin({
-              authToken: process.env.SENTRY_AUTH_TOKEN,
-              org: 'sentry',
-              project: 'chatbox',
-              url: 'https://sentry.midway.run/',
-              release: {
-                name: inferredRelease,
-                ...(inferredDist ? { dist: inferredDist } : {}),
-              },
-              sourcemaps: {
-                assets: isProduction ? 'release/app/dist/renderer/**' : 'output/renderer/**',
-              },
-              telemetry: false,
-            })
-          : undefined,
-      ].filter(Boolean),
-      build: {
-        outDir: isProduction ? 'release/app/dist/renderer' : undefined,
-        target: 'es2020', // Avoid static initialization blocks for browser compatibility
-        sourcemap: isProduction ? 'hidden' : true,
-        minify: isProduction ? 'esbuild' : false, // Use esbuild for faster, less memory-intensive minification
-        rollupOptions: {
-          output: {
-            entryFileNames: 'js/[name].[hash].js',
-            chunkFileNames: 'js/[name].[hash].js',
-            assetFileNames: (assetInfo) => {
-              if (assetInfo.name?.endsWith('.css')) {
-                return 'styles/[name].[hash][extname]'
-              }
-              if (/\.(woff|woff2|eot|ttf|otf)$/i.test(assetInfo.name || '')) {
-                return 'fonts/[name].[hash][extname]'
-              }
-              if (/\.(png|jpg|jpeg|gif|svg|webp|ico)$/i.test(assetInfo.name || '')) {
-                return 'images/[name].[hash][extname]'
-              }
-              return 'assets/[name].[hash][extname]'
-            },
-            // Optimize chunk splitting to reduce memory usage during build
-            manualChunks(id) {
-              if (id.includes('node_modules')) {
-                // Split large vendor chunks
-                if (id.includes('@ai-sdk') || id.includes('ai/')) {
-                  return 'vendor-ai'
-                }
-                if (id.includes('@mantine') || id.includes('@tabler')) {
-                  return 'vendor-ui'
-                }
-                if (id.includes('mermaid') || id.includes('d3')) {
-                  return 'vendor-charts'
-                }
-              }
-            },
-          },
-        },
-      },
-      css: {
-        modules: {
-          generateScopedName: '[name]__[local]___[hash:base64:5]',
-        },
-        postcss: './postcss.config.cjs',
-      },
-      server: {
-        port: 1212,
-        strictPort: true,
-      },
-      define: {
-        'process.type': '"renderer"',
-        'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development'),
-        'process.env.CHATBOX_BUILD_TARGET': JSON.stringify(process.env.CHATBOX_BUILD_TARGET || 'unknown'),
-        'process.env.CHATBOX_BUILD_PLATFORM': JSON.stringify(process.env.CHATBOX_BUILD_PLATFORM || 'unknown'),
-        'process.env.USE_LOCAL_API': JSON.stringify(process.env.USE_LOCAL_API || ''),
-        'process.env.USE_BETA_API': JSON.stringify(process.env.USE_BETA_API || ''),
-      },
-      optimizeDeps: {
-        include: ['mermaid'],
-        esbuildOptions: {
-          target: 'es2015',
-        },
-      },
-    },
+    renderer: rendererConfig,
   }
 })

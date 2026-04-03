@@ -1,5 +1,6 @@
 import type { BridgeAppManifest } from '@shared/types'
 import { useQuery } from '@tanstack/react-query'
+import { getSupabaseAuthHeaders } from '@/packages/supabase'
 import queryClient from '@/stores/queryClient'
 
 export type ChatBridgeAppDefinition = BridgeAppManifest & {
@@ -182,7 +183,13 @@ function normalizeRegistryEntries(entries: RegistryApiResponse['apps']): ChatBri
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${CHATBRIDGE_API_ORIGIN}${path}`)
+  const authHeaders = await getSupabaseAuthHeaders()
+  const response = await fetch(`${CHATBRIDGE_API_ORIGIN}${path}`, {
+    headers: {
+      ...authHeaders,
+    },
+  })
+
   if (!response.ok) {
     throw new Error(`ChatBridge backend request failed: ${response.status}`)
   }
@@ -190,10 +197,12 @@ async function fetchJson<T>(path: string): Promise<T> {
 }
 
 async function sendJson<T>(path: string, method: 'POST', body: Record<string, unknown>): Promise<T> {
+  const authHeaders = await getSupabaseAuthHeaders()
   const response = await fetch(`${CHATBRIDGE_API_ORIGIN}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders,
     },
     body: JSON.stringify(body),
   })

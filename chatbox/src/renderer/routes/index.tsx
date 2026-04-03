@@ -21,6 +21,7 @@ import { router } from '@/router'
 import { createSession as createSessionStore } from '@/stores/chatStore'
 import { submitNewUserMessage, switchCurrentSession } from '@/stores/sessionActions'
 import { initEmptyChatSession } from '@/stores/sessionHelpers'
+import { shouldSkipProviderSetup } from '@/stores/settingActions'
 import { useUIStore } from '@/stores/uiStore'
 
 export const Route = createFileRoute('/')({
@@ -177,7 +178,7 @@ function Index() {
           </Text>
         </Stack>
 
-        {!providers.length && (
+        {!providers.length && !shouldSkipProviderSetup() && (
           <Box px="sm">
             <Paper
               radius="md"

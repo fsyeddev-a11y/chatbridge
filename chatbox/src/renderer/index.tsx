@@ -7,6 +7,7 @@ import { useAtomValue } from 'jotai'
 import 'photoswipe/dist/photoswipe.css'
 import { StrictMode, useState } from 'react'
 import ReactDOM from 'react-dom/client'
+import AuthGate from './components/auth/AuthGate'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
 import i18n from './i18n'
 import { getLogger } from './lib/utils'
@@ -142,7 +143,9 @@ initializeApp()
       <StrictMode>
         <ErrorBoundary>
           <QueryClientProvider client={queryClient}>
-            <RouterProvider router={router} />
+            <AuthGate>
+              <RouterProvider router={router} />
+            </AuthGate>
           </QueryClientProvider>
         </ErrorBoundary>
       </StrictMode>
