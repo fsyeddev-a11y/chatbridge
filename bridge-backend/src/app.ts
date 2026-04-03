@@ -1,10 +1,12 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import { ZodError } from 'zod'
 import { createSupabaseAuthVerifier, getBearerToken, type AuthVerifier } from './auth.js'
+import { createOpenAIChatClient, type ChatCompletionClient } from './chat.js'
 import {
   AppIdParamsSchema,
   AppManifestSchema,
   AuditEventSchema,
+  BackendChatRequestSchema,
   ClassAllowlistBodySchema,
   ClassAllowlistToggleBodySchema,
   ClassIdParamsSchema,
@@ -16,6 +18,7 @@ export type AppOptions = {
   store?: BridgeStore
   allowedOrigins?: string[]
   authVerifier?: AuthVerifier
+  chatClient?: ChatCompletionClient
 }
 
 const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://localhost:4173']
@@ -38,6 +41,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   const store = options.store ?? createInMemoryBridgeStore()
   const allowedOrigins = new Set(options.allowedOrigins ?? getConfiguredAllowedOrigins())
   const authVerifier = options.authVerifier ?? createSupabaseAuthVerifier()
+  const chatClient = options.chatClient ?? createOpenAIChatClient()
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin
@@ -204,6 +208,15 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     return {
       actions: store.listReviewActions(),
     }
+  })
+
+  app.post('/api/chat/generate', async (request, reply) => {
+    const body = BackendChatRequestSchema.parse(request.body)
+    const response = await chatClient({
+      messages: body.messages,
+    })
+
+    return reply.send(response)
   })
 
   return app

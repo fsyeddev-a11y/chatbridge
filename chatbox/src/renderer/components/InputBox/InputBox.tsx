@@ -75,6 +75,7 @@ import { useUIStore } from '@/stores/uiStore'
 import { delay } from '@/utils'
 import { featureFlags } from '@/utils/feature-flags'
 import { trackEvent } from '@/utils/track'
+import { USE_CHATBRIDGE_BACKEND_CHAT } from '@/variables'
 import {
   type KnowledgeBase,
   type Message,
@@ -274,6 +275,9 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
 
     const { providers } = useProviders()
     const modelSelectorDisplayText = useMemo(() => {
+      if (USE_CHATBRIDGE_BACKEND_CHAT) {
+        return 'TutorMeAI'
+      }
       if (!model) {
         return t('Select Model')
       }
@@ -318,7 +322,7 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
           return false
         }
       },
-      enabled: !!(model?.provider && model?.modelId),
+      enabled: !!(model?.provider && model?.modelId) && !USE_CHATBRIDGE_BACKEND_CHAT,
       staleTime: 5 * 60 * 1000,
       gcTime: 10 * 60 * 1000,
     })
@@ -1213,6 +1217,7 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
                 </TokenCountMenu>
 
                 {/* Model Selector */}
+                {!USE_CHATBRIDGE_BACKEND_CHAT ? (
                 <Tooltip
                   label={
                     <Flex align="center" c="white" gap="xxs">
@@ -1254,6 +1259,13 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
                     </UnstyledButton>
                   </ModelSelector>
                 </Tooltip>
+                ) : (
+                  <div className="flex items-center gap-1 px-2 py-1 rounded-lg text-[var(--chatbox-tint-secondary)]">
+                    <Text size="sm" className={cn(isSmallScreen ? 'max-w-[100px]' : 'max-w-[160px]')}>
+                      {modelSelectorDisplayText}
+                    </Text>
+                  </div>
+                )}
               </Flex>
             </Flex>
           </Stack>

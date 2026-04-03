@@ -60,3 +60,12 @@ export const ClassAllowlistBodySchema = z.object({
 export const ClassAllowlistToggleBodySchema = z.object({
   enabledBy: z.string().min(1),
 })
+
+export const BackendChatMessageSchema = z.object({
+  role: z.enum(['system', 'user', 'assistant']),
+  content: z.string().min(1),
+})
+
+export const BackendChatRequestSchema = z.object({
+  messages: z.array(BackendChatMessageSchema).min(1),
+})

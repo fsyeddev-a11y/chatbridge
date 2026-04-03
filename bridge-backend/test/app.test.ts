@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { createApp, getConfiguredAllowedOrigins } from '../src/app.js'
+import type { ChatCompletionClient } from '../src/chat.js'
 import {
   createFileBackedBridgeStore,
   createInMemoryBridgeStore,
@@ -15,6 +16,10 @@ describe('bridge-backend app', () => {
   const allowAllAuth = async () => ({
     id: 'user-1',
     email: 'tester@example.com',
+  })
+  const fakeChatClient: ChatCompletionClient = async () => ({
+    content: 'Bridge-backed answer',
+    model: 'gpt-4o-mini',
   })
 
   it('returns health status', async () => {
@@ -42,7 +47,7 @@ describe('bridge-backend app', () => {
   })
 
   it('returns approved apps for a class from backend-owned allowlist state', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
     const response = await app.inject({
       method: 'GET',
       url: '/api/classes/demo-class/apps',
@@ -61,7 +66,7 @@ describe('bridge-backend app', () => {
   })
 
   it('accepts structured audit events', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
     const response = await app.inject({
       method: 'POST',
       url: '/api/audit/events',
@@ -88,7 +93,7 @@ describe('bridge-backend app', () => {
   })
 
   it('rejects invalid audit events', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
     const response = await app.inject({
       method: 'POST',
       url: '/api/audit/events',
@@ -124,7 +129,7 @@ describe('bridge-backend app', () => {
   })
 
   it('rejects unauthenticated api requests', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
     const response = await app.inject({
       method: 'GET',
       url: '/api/registry/apps',
@@ -213,7 +218,7 @@ describe('bridge-backend app', () => {
   })
 
   it('registers a new app manifest as pending review', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
     const response = await app.inject({
       method: 'POST',
       url: '/api/registry/apps',
@@ -247,7 +252,7 @@ describe('bridge-backend app', () => {
 
   it('updates review state and exposes review actions', async () => {
     const store = createInMemoryBridgeStore()
-    const app = createApp({ store, authVerifier: allowAllAuth })
+    const app = createApp({ store, authVerifier: allowAllAuth, chatClient: fakeChatClient })
 
     const reviewResponse = await app.inject({
       method: 'POST',
@@ -279,7 +284,7 @@ describe('bridge-backend app', () => {
   })
 
   it('enables and disables apps per class through the allowlist API', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
 
     const enableResponse = await app.inject({
       method: 'POST',
@@ -313,7 +318,7 @@ describe('bridge-backend app', () => {
   })
 
   it('rejects allowlist enables for apps that are missing or not platform-approved', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth })
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
 
     const missingAppResponse = await app.inject({
       method: 'POST',
@@ -376,6 +381,31 @@ describe('bridge-backend app', () => {
     assert.equal(pendingAppEnableResponse.statusCode, 404)
     assert.deepEqual(pendingAppEnableResponse.json(), {
       error: 'approved_app_not_found',
+    })
+  })
+
+  it('generates chat completions through the backend-owned chat route', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        messages: [
+          {
+            role: 'user',
+            content: 'Hello from TutorMeAI',
+          },
+        ],
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json(), {
+      content: 'Bridge-backed answer',
+      model: 'gpt-4o-mini',
     })
   })
 })

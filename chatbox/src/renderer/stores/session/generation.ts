@@ -17,6 +17,7 @@ import { cloneMessage, getMessageText, mergeMessages } from '@shared/utils/messa
 import { identity, pickBy } from 'lodash'
 import { createModelDependencies } from '@/adapters'
 import * as appleAppStore from '@/packages/apple_app_store'
+import { generateBackendChat } from '@/packages/backend-chat'
 import { buildContextForAI } from '@/packages/context-management'
 import {
   buildAttachmentWrapperPrefix,
@@ -31,6 +32,7 @@ import platform from '@/platform'
 import storage from '@/storage'
 import { StorageKeyGenerator } from '@/storage/StoreStorage'
 import { trackEvent } from '@/utils/track'
+import { USE_CHATBRIDGE_BACKEND_CHAT } from '@/variables'
 import * as chatStore from '../chatStore'
 import { settingsStore } from '../settingsStore'
 import { uiStore } from '../uiStore'
@@ -130,8 +132,13 @@ export async function generate(
     // FIXME: For picture message generation, need to show placeholder
     // pictures: session.type === 'picture' ? createLoadingPictures(settings.imageGenerateNum) : targetMsg.pictures,
     cancel: undefined,
-    aiProvider: settings.provider,
-    model: await getModelDisplayName(settings, globalSettings, session.type || 'chat'),
+    aiProvider: USE_CHATBRIDGE_BACKEND_CHAT && (session.type === 'chat' || session.type === undefined)
+      ? 'chatbridge-backend'
+      : settings.provider,
+    model:
+      USE_CHATBRIDGE_BACKEND_CHAT && (session.type === 'chat' || session.type === undefined)
+        ? process.env.CHATBRIDGE_DEFAULT_MODEL || 'gpt-4o-mini'
+        : await getModelDisplayName(settings, globalSettings, session.type || 'chat'),
     style: session.type === 'picture' ? settings.dalleStyle : undefined,
     generating: true,
     errorCode: undefined,
@@ -168,8 +175,6 @@ export async function generate(
   }
 
   try {
-    const dependencies = await createModelDependencies()
-    const model = getModel(settings, globalSettings, configs, dependencies)
     const sessionKnowledgeBaseMap = uiStore.getState().sessionKnowledgeBaseMap
     const knowledgeBase = sessionKnowledgeBaseMap[sessionId]
     const webBrowsing = getSessionWebBrowsing(sessionId, settings.provider)
@@ -177,6 +182,10 @@ export async function generate(
       // Chat message generation
       case 'chat':
       case undefined: {
+        const model =
+          USE_CHATBRIDGE_BACKEND_CHAT
+            ? null
+            : getModel(settings, globalSettings, configs, await createModelDependencies())
         const startTime = Date.now()
         let firstTokenLatency: number | undefined
         const persistInterval = 2000
@@ -184,7 +193,7 @@ export async function generate(
         const promptMsgs = await genMessageContext(
           settings,
           messages.slice(0, targetMsgIx),
-          model.isSupportToolUse('read-file'),
+          model?.isSupportToolUse('read-file') ?? false,
           { compactionPoints: session.compactionPoints }
         )
         const modifyMessageCache: OnResultChangeWithCancel = async (updated) => {
@@ -206,35 +215,67 @@ export async function generate(
           }
         }
 
-        const { result } = await streamText(model, {
-          sessionId: session.id,
-          messages: promptMsgs,
-          onResultChangeWithCancel: modifyMessageCache,
-          onStatusChange: (status) => {
-            targetMsg = {
-              ...targetMsg,
-              status: status ? [status] : [],
-            }
-            void modifyMessage(sessionId, targetMsg, false, true)
-          },
-          providerOptions: settings.providerOptions,
-          knowledgeBase,
-          webBrowsing,
-        })
-        targetMsg = {
-          ...targetMsg,
-          generating: false,
-          cancel: undefined,
-          tokensUsed: targetMsg.tokensUsed ?? estimateTokensFromMessages([...promptMsgs, targetMsg]),
-          status: [],
-          finishReason: result.finishReason,
-          usage: result.usage,
+        if (USE_CHATBRIDGE_BACKEND_CHAT) {
+          targetMsg = {
+            ...targetMsg,
+            aiProvider: 'chatbridge-backend',
+            model: process.env.CHATBRIDGE_DEFAULT_MODEL || 'gpt-4o-mini',
+            status: [],
+          }
+          await modifyMessage(sessionId, targetMsg, false, true)
+          const backendResult = await generateBackendChat(promptMsgs)
+          firstTokenLatency = Date.now() - startTime
+          targetMsg = {
+            ...targetMsg,
+            contentParts: [{ type: 'text', text: backendResult.content }],
+            generating: false,
+            cancel: undefined,
+            aiProvider: 'chatbridge-backend',
+            model: backendResult.model,
+            tokensUsed: estimateTokensFromMessages([
+              ...promptMsgs,
+              {
+                ...targetMsg,
+                contentParts: [{ type: 'text', text: backendResult.content }],
+              },
+            ]),
+            status: [],
+            finishReason: 'stop',
+            firstTokenLatency,
+          }
+        } else {
+          const { result } = await streamText(model, {
+            sessionId: session.id,
+            messages: promptMsgs,
+            onResultChangeWithCancel: modifyMessageCache,
+            onStatusChange: (status) => {
+              targetMsg = {
+                ...targetMsg,
+                status: status ? [status] : [],
+              }
+              void modifyMessage(sessionId, targetMsg, false, true)
+            },
+            providerOptions: settings.providerOptions,
+            knowledgeBase,
+            webBrowsing,
+          })
+          targetMsg = {
+            ...targetMsg,
+            generating: false,
+            cancel: undefined,
+            tokensUsed: targetMsg.tokensUsed ?? estimateTokensFromMessages([...promptMsgs, targetMsg]),
+            status: [],
+            finishReason: result.finishReason,
+            usage: result.usage,
+          }
         }
         await modifyMessage(sessionId, targetMsg, true)
         break
       }
       // Picture message generation
       case 'picture': {
+        const dependencies = await createModelDependencies()
+        const model = getModel(settings, globalSettings, configs, dependencies)
         // Take the most recent user message before the current message as prompt
         const userMessage = messages.slice(0, targetMsgIx).findLast((m) => m.role === 'user')
         if (!userMessage) {

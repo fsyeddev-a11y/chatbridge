@@ -154,6 +154,7 @@ export default defineConfig(({ mode }) => {
       'process.env.CHATBRIDGE_DISABLE_CHATBOX_CLOUD': JSON.stringify(
         process.env.CHATBRIDGE_DISABLE_CHATBOX_CLOUD || ''
       ),
+      'process.env.CHATBRIDGE_DEFAULT_MODEL': JSON.stringify(process.env.CHATBRIDGE_DEFAULT_MODEL || ''),
       'process.env.SUPABASE_URL': JSON.stringify(process.env.SUPABASE_URL || ''),
       'process.env.SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY || ''),
     },

@@ -18,6 +18,8 @@ import { lastUsedModelStore } from '@/stores/lastUsedModelStore'
 import * as scrollActions from '@/stores/scrollActions'
 import { modifyMessage, removeCurrentThread, startNewThread, submitNewUserMessage } from '@/stores/sessionActions'
 import { getAllMessageList } from '@/stores/sessionHelpers'
+import { USE_CHATBRIDGE_BACKEND_CHAT } from '@/variables'
+import { ModelProviderEnum } from '@shared/types'
 
 export const Route = createFileRoute('/session/$sessionId')({
   component: RouteComponent,
@@ -144,6 +146,12 @@ function RouteComponent() {
   }, [currentSession, lastGeneratingMessage])
 
   const model = useMemo(() => {
+    if (USE_CHATBRIDGE_BACKEND_CHAT) {
+      return {
+        provider: ModelProviderEnum.OpenAI,
+        modelId: process.env.CHATBRIDGE_DEFAULT_MODEL || 'gpt-4o-mini',
+      }
+    }
     if (!currentSession?.settings?.modelId || !currentSession?.settings?.provider) {
       return undefined
     }
