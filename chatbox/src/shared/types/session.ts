@@ -260,11 +260,13 @@ export const BridgeToolManifestSchema = z.object({
 export const BridgeAppManifestSchema = z.object({
   appId: z.string(),
   name: z.string(),
+  version: z.string(),
   description: z.string(),
   developerName: z.string(),
   executionModel: z.enum(['iframe', 'server-side']),
   launchUrl: z.string().optional(),
   allowedOrigins: z.array(z.string()).default([]),
+  heartbeatTimeoutMs: z.number().positive().optional(),
   authType: BridgeAppAuthTypeSchema,
   subjectTags: z.array(z.string()).default([]),
   gradeBand: z.string().optional(),

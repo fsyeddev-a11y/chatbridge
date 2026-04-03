@@ -16,6 +16,7 @@ export type AppManifest = {
   executionModel: 'iframe' | 'server-side'
   launchUrl?: string
   allowedOrigins: string[]
+  heartbeatTimeoutMs?: number
   authType: RuntimeAuthType
   subjectTags: string[]
   gradeBand?: string
@@ -37,6 +38,15 @@ export type ClassAppAllowlist = {
   enabledBy: string
   enabledAt: number
   disabledAt?: number
+}
+
+export type ReviewAction = {
+  appId: string
+  version: string
+  action: 'approve' | 'reject' | 'suspend' | 'reinstate' | 'request_changes'
+  reviewerId: string
+  notes?: string
+  timestamp: number
 }
 
 export type AuditEvent = {

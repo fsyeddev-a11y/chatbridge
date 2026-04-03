@@ -1,4 +1,6 @@
 import type { BridgeAppManifest } from '@shared/types'
+import { useQuery } from '@tanstack/react-query'
+import queryClient from '@/stores/queryClient'
 
 export type ChatBridgeAppDefinition = BridgeAppManifest & {
   reviewState: 'approved' | 'pending' | 'rejected' | 'suspended'
@@ -7,10 +9,48 @@ export type ChatBridgeAppDefinition = BridgeAppManifest & {
   mockMode?: 'chess' | 'weather' | 'classroom'
 }
 
-const appRegistry: ChatBridgeAppDefinition[] = [
+export type ChatBridgeAllowlistEntry = {
+  classId: string
+  appId: string
+  enabledBy: string
+  enabledAt: number
+  disabledAt?: number
+}
+
+type RegistryApiResponse = {
+  apps: Array<{
+    manifest: BridgeAppManifest
+    reviewState: ChatBridgeAppDefinition['reviewState']
+  }>
+}
+
+type ClassAppsApiResponse = {
+  classId: string
+  apps: Array<{
+    manifest: BridgeAppManifest
+    reviewState: ChatBridgeAppDefinition['reviewState']
+  }>
+}
+
+type ClassAllowlistApiResponse = {
+  classId: string
+  allowlist: ChatBridgeAllowlistEntry[]
+}
+
+type RegistryAppResponse = {
+  app: {
+    manifest: BridgeAppManifest
+    reviewState: ChatBridgeAppDefinition['reviewState']
+  }
+}
+
+const CHATBRIDGE_API_ORIGIN = process.env.CHATBRIDGE_API_ORIGIN || 'http://localhost:8787'
+
+const fallbackRegistry: ChatBridgeAppDefinition[] = [
   {
     appId: 'chess',
     name: 'Chess Coach',
+    version: '1.0.0',
     description: 'Interactive chess board with guided state updates for in-chat coaching.',
     developerName: 'ChatBridge Demo',
     executionModel: 'iframe',
@@ -37,10 +77,12 @@ const appRegistry: ChatBridgeAppDefinition[] = [
   {
     appId: 'weather',
     name: 'Weather Dashboard',
+    version: '1.0.0',
     description: 'Lightweight public weather app for quick lookups and contextual summaries.',
     developerName: 'ChatBridge Demo',
     executionModel: 'iframe',
-    allowedOrigins: ['null'],
+    launchUrl: 'http://localhost:4173',
+    allowedOrigins: ['http://localhost:4173'],
     authType: 'none',
     subjectTags: ['Science'],
     gradeBand: 'K-12',
@@ -48,7 +90,6 @@ const appRegistry: ChatBridgeAppDefinition[] = [
     reviewState: 'approved',
     enabledClassIds: ['demo-class'],
     llmOwnership: 'platform',
-    mockMode: 'weather',
     tools: [
       {
         name: 'chatbridge_weather_lookup',
@@ -59,6 +100,7 @@ const appRegistry: ChatBridgeAppDefinition[] = [
   {
     appId: 'google-classroom',
     name: 'Google Classroom Assistant',
+    version: '1.0.0',
     description: 'Read-only classroom context for due dates, coursework, and tutoring follow-ups.',
     developerName: 'ChatBridge Demo',
     executionModel: 'iframe',
@@ -80,19 +122,209 @@ const appRegistry: ChatBridgeAppDefinition[] = [
   },
 ]
 
-export function getChatBridgeApps(): ChatBridgeAppDefinition[] {
-  return appRegistry
+const mockModeByAppId: Record<string, ChatBridgeAppDefinition['mockMode']> = {
+  chess: 'chess',
+  weather: 'weather',
+  'google-classroom': 'classroom',
 }
 
-export function getApprovedChatBridgeAppsForClass(classId: string): ChatBridgeAppDefinition[] {
-  return appRegistry.filter((app) => app.reviewState === 'approved' && app.enabledClassIds.includes(classId))
+export const ChatBridgeQueryKeys = {
+  ChatBridgeApps: ['chatbridge', 'apps'],
+  ChatBridgeClassApps: (classId: string) => ['chatbridge', 'class-apps', classId],
+  ChatBridgeClassAllowlist: (classId: string) => ['chatbridge', 'class-allowlist', classId],
 }
 
-export function getChatBridgeAppById(appId: string | undefined): ChatBridgeAppDefinition | undefined {
+function getFallbackRegistry() {
+  return fallbackRegistry
+}
+
+function getFallbackAppById(appId: string | undefined) {
   if (!appId) {
     return undefined
   }
-  return appRegistry.find((app) => app.appId === appId)
+  return getFallbackRegistry().find((app) => app.appId === appId)
+}
+
+function augmentAppDefinition(
+  app: Omit<ChatBridgeAppDefinition, 'enabledClassIds' | 'llmOwnership'> &
+    Partial<Pick<ChatBridgeAppDefinition, 'enabledClassIds' | 'llmOwnership' | 'mockMode'>>
+): ChatBridgeAppDefinition {
+  const fallback = getFallbackAppById(app.appId)
+  const shouldAllowSrcDocFallback = !app.launchUrl && (fallback?.allowedOrigins || []).includes('null')
+  const allowedOrigins = Array.from(
+    new Set([...(app.allowedOrigins || []), ...(shouldAllowSrcDocFallback ? ['null'] : [])])
+  )
+
+  return {
+    ...app,
+    allowedOrigins,
+    enabledClassIds: app.enabledClassIds || fallback?.enabledClassIds || [],
+    llmOwnership: app.llmOwnership || 'platform',
+    mockMode: app.mockMode || mockModeByAppId[app.appId] || fallback?.mockMode,
+  }
+}
+
+function normalizeRegistryEntries(entries: RegistryApiResponse['apps']): ChatBridgeAppDefinition[] {
+  return entries.map((entry) =>
+    augmentAppDefinition({
+      ...entry.manifest,
+      reviewState: entry.reviewState,
+    })
+  )
+}
+
+async function fetchJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${CHATBRIDGE_API_ORIGIN}${path}`)
+  if (!response.ok) {
+    throw new Error(`ChatBridge backend request failed: ${response.status}`)
+  }
+  return (await response.json()) as T
+}
+
+async function sendJson<T>(path: string, method: 'POST', body: Record<string, unknown>): Promise<T> {
+  const response = await fetch(`${CHATBRIDGE_API_ORIGIN}${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    throw new Error(`ChatBridge backend request failed: ${response.status}`)
+  }
+
+  return (await response.json()) as T
+}
+
+async function invalidateChatBridgeQueries(classId?: string) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['chatbridge'] }),
+    classId ? queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeClassApps(classId) }) : Promise.resolve(),
+    classId
+      ? queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeClassAllowlist(classId) })
+      : Promise.resolve(),
+  ])
+}
+
+export async function fetchChatBridgeApps(): Promise<ChatBridgeAppDefinition[]> {
+  try {
+    const response = await fetchJson<RegistryApiResponse>('/api/registry/apps')
+    return normalizeRegistryEntries(response.apps)
+  } catch (error) {
+    console.warn('Falling back to local ChatBridge registry', error)
+    return getFallbackRegistry()
+  }
+}
+
+export async function fetchApprovedChatBridgeAppsForClass(classId: string): Promise<ChatBridgeAppDefinition[]> {
+  try {
+    const response = await fetchJson<ClassAppsApiResponse>(`/api/classes/${classId}/apps`)
+    return normalizeRegistryEntries(response.apps)
+  } catch (error) {
+    console.warn('Falling back to local class-approved ChatBridge apps', error)
+    return getFallbackRegistry().filter((app) => app.reviewState === 'approved' && app.enabledClassIds.includes(classId))
+  }
+}
+
+export async function fetchChatBridgeAppById(appId: string | undefined): Promise<ChatBridgeAppDefinition | undefined> {
+  if (!appId) {
+    return undefined
+  }
+
+  try {
+    const allApps = await queryClient.ensureQueryData({
+      queryKey: ChatBridgeQueryKeys.ChatBridgeApps,
+      queryFn: fetchChatBridgeApps,
+      staleTime: 30_000,
+    })
+    return allApps.find((app) => app.appId === appId)
+  } catch {
+    return getFallbackAppById(appId)
+  }
+}
+
+export function useChatBridgeApps() {
+  return useQuery({
+    queryKey: ChatBridgeQueryKeys.ChatBridgeApps,
+    queryFn: fetchChatBridgeApps,
+    staleTime: 30_000,
+  })
+}
+
+export function useApprovedChatBridgeAppsForClass(classId: string) {
+  return useQuery({
+    queryKey: ChatBridgeQueryKeys.ChatBridgeClassApps(classId),
+    queryFn: () => fetchApprovedChatBridgeAppsForClass(classId),
+    staleTime: 30_000,
+    enabled: !!classId,
+  })
+}
+
+export async function fetchChatBridgeAllowlist(classId: string): Promise<ChatBridgeAllowlistEntry[]> {
+  try {
+    const response = await fetchJson<ClassAllowlistApiResponse>(`/api/classes/${classId}/allowlist`)
+    return response.allowlist
+  } catch (error) {
+    console.warn('Falling back to local class allowlist state', error)
+    return getFallbackRegistry()
+      .filter((app) => app.enabledClassIds.includes(classId))
+      .map((app) => ({
+        classId,
+        appId: app.appId,
+        enabledBy: 'teacher-demo',
+        enabledAt: 0,
+      }))
+  }
+}
+
+export function useChatBridgeAllowlist(classId: string) {
+  return useQuery({
+    queryKey: ChatBridgeQueryKeys.ChatBridgeClassAllowlist(classId),
+    queryFn: () => fetchChatBridgeAllowlist(classId),
+    staleTime: 30_000,
+    enabled: !!classId,
+  })
+}
+
+export async function registerChatBridgeApp(manifest: BridgeAppManifest) {
+  const response = await sendJson<RegistryAppResponse>('/api/registry/apps', 'POST', manifest)
+  await invalidateChatBridgeQueries()
+  return augmentAppDefinition({
+    ...response.app.manifest,
+    reviewState: response.app.reviewState,
+  })
+}
+
+export async function reviewChatBridgeApp(
+  appId: string,
+  input: {
+    reviewState: ChatBridgeAppDefinition['reviewState']
+    reviewerId: string
+    reviewNotes?: string
+  }
+) {
+  const response = await sendJson<RegistryAppResponse>(`/api/registry/apps/${appId}/review`, 'POST', input)
+  await invalidateChatBridgeQueries()
+  return augmentAppDefinition({
+    ...response.app.manifest,
+    reviewState: response.app.reviewState,
+  })
+}
+
+export async function enableChatBridgeAppForClass(classId: string, appId: string, enabledBy: string) {
+  await sendJson<ClassAllowlistApiResponse>(`/api/classes/${classId}/allowlist`, 'POST', {
+    appId,
+    enabledBy,
+  })
+  await invalidateChatBridgeQueries(classId)
+}
+
+export async function disableChatBridgeAppForClass(classId: string, appId: string, enabledBy: string) {
+  await sendJson<ClassAllowlistApiResponse>(`/api/classes/${classId}/allowlist/${appId}/disable`, 'POST', {
+    enabledBy,
+  })
+  await invalidateChatBridgeQueries(classId)
 }
 
 function makePostMessageScript(appId: string, eventType: string, payload: Record<string, unknown>) {
@@ -183,11 +415,43 @@ function buildMockFrame(config: {
         <button id="complete-btn" class="secondary">${config.completionLabel}</button>
       </div>
       <div class="panel">
-        This mock iframe is standing in for an external third-party app. It can only communicate with TutorMeAI
-        through Bridge-controlled postMessage events.
+        <strong>Bridge status:</strong> <span id="bridge-status">Waiting for INIT from TutorMeAI.</span>
       </div>
     </div>
     <script>
+      function sendHeartbeat() {
+        window.parent.postMessage({
+          source: 'chatbridge-app',
+          version: '1.0',
+          appId: ${JSON.stringify(config.appId)},
+          type: 'HEARTBEAT'
+        }, '*')
+      }
+
+      window.addEventListener('message', function (event) {
+        var data = event.data || {}
+        if (data.source !== 'chatbridge-host' || data.appId !== ${JSON.stringify(config.appId)}) {
+          return
+        }
+
+        var status = document.getElementById('bridge-status')
+        if (data.type === 'INIT') {
+          var classId = data.payload && data.payload.classId ? data.payload.classId : 'unknown-class'
+          status.textContent = 'INIT received for ' + classId + '. Ready to send events.'
+          return
+        }
+
+        if (data.type === 'PING') {
+          status.textContent = 'PING received. Sending heartbeat back to TutorMeAI.'
+          sendHeartbeat()
+          return
+        }
+
+        if (data.type === 'TERMINATE') {
+          status.textContent = 'TutorMeAI ended the app session.'
+        }
+      })
+
       document.getElementById('ready-btn').addEventListener('click', function () {
         ${readyScript}
       })
@@ -203,6 +467,10 @@ function buildMockFrame(config: {
 }
 
 export function getChatBridgeMockSrcDoc(app: ChatBridgeAppDefinition): string | undefined {
+  if (app.launchUrl && !app.allowedOrigins.includes('null')) {
+    return undefined
+  }
+
   switch (app.mockMode) {
     case 'chess':
       return buildMockFrame({

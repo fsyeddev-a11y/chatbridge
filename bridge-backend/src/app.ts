@@ -1,6 +1,14 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import { ZodError } from 'zod'
-import { AuditEventSchema, ClassIdParamsSchema } from './schemas.js'
+import {
+  AppIdParamsSchema,
+  AppManifestSchema,
+  AuditEventSchema,
+  ClassAllowlistBodySchema,
+  ClassAllowlistToggleBodySchema,
+  ClassIdParamsSchema,
+  ReviewActionBodySchema,
+} from './schemas.js'
 import { createInMemoryBridgeStore, type BridgeStore } from './store.js'
 
 export type AppOptions = {
@@ -10,6 +18,21 @@ export type AppOptions = {
 export function createApp(options: AppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false })
   const store = options.store ?? createInMemoryBridgeStore()
+  const allowedOrigins = new Set(['http://localhost:3000', 'http://localhost:4173'])
+
+  app.addHook('onRequest', async (request, reply) => {
+    const origin = request.headers.origin
+    if (origin && allowedOrigins.has(origin)) {
+      reply.header('Access-Control-Allow-Origin', origin)
+      reply.header('Vary', 'Origin')
+      reply.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+      reply.header('Access-Control-Allow-Headers', 'Content-Type')
+    }
+
+    if (request.method === 'OPTIONS') {
+      return reply.status(204).send()
+    }
+  })
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ZodError) {
@@ -38,7 +61,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.get('/api/registry/apps/:appId', async (request, reply) => {
-    const { appId } = request.params as { appId: string }
+    const { appId } = AppIdParamsSchema.parse(request.params)
     const appEntry = store.getRegistryEntry(appId)
     if (!appEntry) {
       return reply.status(404).send({
@@ -48,6 +71,29 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
 
     return {
       app: appEntry,
+    }
+  })
+
+  app.post('/api/registry/apps', async (request, reply) => {
+    const manifest = AppManifestSchema.parse(request.body)
+    const appEntry = store.registerApp(manifest)
+    return reply.status(201).send({
+      app: appEntry,
+    })
+  })
+
+  app.post('/api/registry/apps/:appId/review', async (request, reply) => {
+    const { appId } = AppIdParamsSchema.parse(request.params)
+    const { reviewState, reviewerId, reviewNotes } = ReviewActionBodySchema.parse(request.body)
+    const updated = store.updateReviewState(appId, reviewState, reviewerId, reviewNotes)
+    if (!updated) {
+      return reply.status(404).send({
+        error: 'app_not_found',
+      })
+    }
+
+    return {
+      app: updated,
     }
   })
 
@@ -67,6 +113,39 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
   })
 
+  app.post('/api/classes/:classId/allowlist', async (request, reply) => {
+    const { classId } = ClassIdParamsSchema.parse(request.params)
+    const { appId, enabledBy } = ClassAllowlistBodySchema.parse(request.body)
+    const allowlistEntry = store.enableAppForClass(classId, appId, enabledBy)
+    if (!allowlistEntry) {
+      return reply.status(404).send({
+        error: 'approved_app_not_found',
+      })
+    }
+
+    return reply.status(201).send({
+      classId,
+      allowlistEntry,
+    })
+  })
+
+  app.post('/api/classes/:classId/allowlist/:appId/disable', async (request, reply) => {
+    const { classId } = ClassIdParamsSchema.parse(request.params)
+    const { appId } = AppIdParamsSchema.parse(request.params)
+    const { enabledBy } = ClassAllowlistToggleBodySchema.parse(request.body)
+    const allowlistEntry = store.disableAppForClass(classId, appId, enabledBy)
+    if (!allowlistEntry) {
+      return reply.status(404).send({
+        error: 'allowlist_entry_not_found',
+      })
+    }
+
+    return {
+      classId,
+      allowlistEntry,
+    }
+  })
+
   app.post('/api/audit/events', async (request, reply) => {
     const event = AuditEventSchema.parse(request.body)
     const storedEvent = store.appendAuditEvent(event)
@@ -74,6 +153,18 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       accepted: true,
       event: storedEvent,
     })
+  })
+
+  app.get('/api/audit/events', async () => {
+    return {
+      events: store.listAuditEvents(),
+    }
+  })
+
+  app.get('/api/review-actions', async () => {
+    return {
+      actions: store.listReviewActions(),
+    }
   })
 
   return app

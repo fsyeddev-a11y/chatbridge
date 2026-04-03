@@ -1,0 +1,11 @@
+{
+  "name": "chatbridge-weather-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/main.js && node --check src/bridge.js && node --check src/weather.js",
+    "serve": "python3 -m http.server 4173"
+  }
+}

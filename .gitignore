@@ -2,3 +2,5 @@
 bridge-backend/node_modules/
 bridge-backend/dist/
 bridge-backend/test/*.js
+bridge-backend/data/
+weather-app/node_modules/

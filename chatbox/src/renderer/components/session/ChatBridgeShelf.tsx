@@ -2,7 +2,7 @@ import { Badge, Button, Card, Group, Stack, Text } from '@mantine/core'
 import type { Session } from '@shared/types'
 import { IconApps, IconExternalLink, IconLock } from '@tabler/icons-react'
 import { useMemo } from 'react'
-import { getApprovedChatBridgeAppsForClass } from '@/packages/chatbridge/registry'
+import { useApprovedChatBridgeAppsForClass } from '@/packages/chatbridge/registry'
 import { activateBridgeApp, getSessionBridgeState } from '@/packages/chatbridge/session'
 
 type ChatBridgeShelfProps = {
@@ -11,57 +11,65 @@ type ChatBridgeShelfProps = {
 
 export default function ChatBridgeShelf({ session }: ChatBridgeShelfProps) {
   const bridgeState = useMemo(() => getSessionBridgeState(session), [session])
-  const apps = useMemo(
-    () => getApprovedChatBridgeAppsForClass(bridgeState.activeClassId),
-    [bridgeState.activeClassId]
-  )
+  const { data: apps = [] } = useApprovedChatBridgeAppsForClass(bridgeState.activeClassId)
 
   return (
-    <Card withBorder radius="lg" p="md" className="mx-3 mt-3 sm:mx-4">
+    <Card withBorder radius="lg" p="sm" className="mx-3 mt-3 sm:mx-4">
       <Stack gap="sm">
         <Group justify="space-between" align="flex-start">
           <div>
             <Group gap={8}>
-              <IconApps size={18} />
+              <IconApps size={16} />
               <Text fw={700}>ChatBridge App Shelf</Text>
             </Group>
-            <Text c="dimmed" size="sm" mt={4}>
-              Approved apps for this class can be launched inside TutorMeAI without exposing the host app to
-              third-party code.
+            <Text c="dimmed" size="xs" mt={2}>
+              Approved apps for this class, ready to launch inside TutorMeAI.
             </Text>
           </div>
-          <Badge variant="light">{bridgeState.activeClassId}</Badge>
+          <Badge size="sm" variant="light">
+            {bridgeState.activeClassId}
+          </Badge>
         </Group>
 
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-2 lg:grid-cols-3">
           {apps.map((app) => {
             const isActive = bridgeState.activeAppId === app.appId
             return (
-              <Card key={app.appId} withBorder radius="md" p="sm">
-                <Stack gap={8}>
+              <Card key={app.appId} withBorder radius="md" p="xs">
+                <Stack gap={6}>
                   <Group justify="space-between" align="center">
-                    <Text fw={600}>{app.name}</Text>
-                    <Badge variant={isActive ? 'filled' : 'light'}>{isActive ? 'Active' : 'Approved'}</Badge>
+                    <Text fw={600} size="sm">
+                      {app.name}
+                    </Text>
+                    <Badge size="xs" variant={isActive ? 'filled' : 'light'}>
+                      {isActive ? 'Active' : 'Approved'}
+                    </Badge>
                   </Group>
 
-                  <Text size="sm" c="dimmed">
+                  <Text size="xs" c="dimmed" lineClamp={2}>
                     {app.description}
                   </Text>
 
-                  <Group gap={8}>
-                    <Badge variant="outline">{app.executionModel}</Badge>
+                  <Group gap={6}>
+                    <Badge size="xs" variant="outline">
+                      {app.executionModel}
+                    </Badge>
                     {app.authType === 'oauth2' ? (
-                      <Badge leftSection={<IconLock size={12} />} variant="outline">
+                      <Badge size="xs" leftSection={<IconLock size={10} />} variant="outline">
                         OAuth
                       </Badge>
                     ) : (
-                      <Badge leftSection={<IconExternalLink size={12} />} variant="outline">
+                      <Badge size="xs" leftSection={<IconExternalLink size={10} />} variant="outline">
                         {app.authType === 'none' ? 'No Auth' : 'API Key'}
                       </Badge>
                     )}
                   </Group>
 
-                  <Button variant={isActive ? 'light' : 'filled'} onClick={() => void activateBridgeApp(session.id, app.appId)}>
+                  <Button
+                    size="compact-sm"
+                    variant={isActive ? 'light' : 'filled'}
+                    onClick={() => void activateBridgeApp(session.id, app.appId)}
+                  >
                     {isActive ? 'Resume App' : 'Open App'}
                   </Button>
                 </Stack>

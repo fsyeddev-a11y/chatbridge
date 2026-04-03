@@ -6,8 +6,8 @@ import { emitChatBridgeEvent } from '@/packages/chatbridge/observability'
 import * as chatStore from '@/stores/chatStore'
 import {
   type ChatBridgeAppDefinition,
-  getApprovedChatBridgeAppsForClass,
-  getChatBridgeAppById,
+  fetchApprovedChatBridgeAppsForClass,
+  fetchChatBridgeAppById,
 } from '@/packages/chatbridge/registry'
 import { activateBridgeApp, getSessionBridgeState, updateBridgeAppContext } from '@/packages/chatbridge/session'
 
@@ -50,6 +50,20 @@ function buildActiveAppSummary(session: Session, app: ChatBridgeAppDefinition | 
   const safeStateSummary = safeStateEntries.length
     ? safeStateEntries.map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join('; ')
     : undefined
+  const lastKnownState = activeContext.summary || safeStateSummary
+
+  if (activeContext.status === 'error') {
+    const errorReason = activeContext.lastError || `${app.name} is unavailable.`
+    return lastKnownState
+      ? `The ${app.name} app encountered an error and is no longer active. Last known state: ${lastKnownState}. Continue assisting the student without the app. Error: ${errorReason}`
+      : `The ${app.name} app encountered an error and is no longer active. Continue assisting the student without the app. Error: ${errorReason}`
+  }
+
+  if (activeContext.status === 'complete') {
+    return lastKnownState
+      ? `${app.name} has completed its task. Last known state: ${lastKnownState}`
+      : `${app.name} has completed its task.`
+  }
 
   return (
     activeContext.summary ||
@@ -135,7 +149,7 @@ export async function getChatBridgeToolSet(
   }
 
   const bridgeState = getSessionBridgeState(session)
-  const approvedApps = getApprovedChatBridgeAppsForClass(bridgeState.activeClassId)
+  const approvedApps = await fetchApprovedChatBridgeAppsForClass(bridgeState.activeClassId)
   if (!approvedApps.length) {
     return null
   }
@@ -150,7 +164,7 @@ export async function getChatBridgeToolSet(
     }
   }
 
-  const activeApp = getChatBridgeAppById(bridgeState.activeAppId)
+  const activeApp = await fetchChatBridgeAppById(bridgeState.activeAppId)
   const activeSummary = buildActiveAppSummary(session, activeApp)
 
   const appDescriptions = approvedApps

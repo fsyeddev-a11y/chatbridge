@@ -24,7 +24,7 @@ export async function activateBridgeApp(sessionId: string, appId: string) {
           ...bridgeState.appContext,
           [appId]: {
             appId,
-            status: existing?.status || 'active',
+            status: 'active',
             summary: existing?.summary,
             lastState: existing?.lastState,
             lastEventAt: Date.now(),

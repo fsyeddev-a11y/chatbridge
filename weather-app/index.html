@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ChatBridge Weather App</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">ChatBridge App</p>
+        <h1>Weather Dashboard</h1>
+        <p class="lede">
+          Real Open-Meteo weather lookup for TutorMeAI. This app runs in an iframe and only communicates with the
+          Bridge through the approved postMessage contract.
+        </p>
+      </section>
+
+      <section class="panel">
+        <div class="status-row">
+          <div>
+            <p class="label">Bridge status</p>
+            <p id="bridge-status" class="value">Waiting for TutorMeAI INIT.</p>
+          </div>
+          <div>
+            <p class="label">Current location</p>
+            <p id="current-location" class="value">No lookup yet</p>
+          </div>
+        </div>
+
+        <form id="weather-form" class="lookup-form">
+          <label for="location-input" class="label">Enter a city or location</label>
+          <div class="input-row">
+            <input id="location-input" name="location" type="text" placeholder="Chicago" autocomplete="off" required />
+            <button type="submit">Look Up Weather</button>
+          </div>
+        </form>
+
+        <div id="message-banner" class="message-banner hidden" role="status"></div>
+
+        <div id="forecast-card" class="forecast-card hidden">
+          <div class="forecast-header">
+            <div>
+              <p class="label">Conditions</p>
+              <h2 id="condition-text">Sunny</h2>
+            </div>
+            <p id="temperature-text" class="temperature">72F</p>
+          </div>
+
+          <div class="forecast-grid">
+            <div>
+              <p class="label">High</p>
+              <p id="high-text" class="metric">75F</p>
+            </div>
+            <div>
+              <p class="label">Low</p>
+              <p id="low-text" class="metric">58F</p>
+            </div>
+            <div>
+              <p class="label">Wind</p>
+              <p id="wind-text" class="metric">10 mph</p>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="complete-btn" type="button" class="secondary">Complete Lookup</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

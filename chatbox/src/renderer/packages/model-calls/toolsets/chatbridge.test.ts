@@ -86,6 +86,39 @@ describe('getChatBridgeToolSet', () => {
     expect(toolSet).toBeNull()
   })
 
+  it('turns errored app state into continue-without-app guidance for the model', async () => {
+    const session: Session = {
+      id: 'session-err',
+      name: 'Errored App Session',
+      messages: [],
+      bridgeState: {
+        activeClassId: 'demo-class',
+        activeAppId: 'chess',
+        appContext: {
+          chess: {
+            appId: 'chess',
+            status: 'error',
+            summary: 'White had a strong kingside attack.',
+            lastState: {
+              phase: 'middlegame',
+              fen: 'safe-fen',
+            },
+            lastError: 'The app stopped responding.',
+          },
+        },
+      },
+    }
+    getSessionMock.mockResolvedValue(session)
+
+    const toolSet = await getChatBridgeToolSet(session.id)
+
+    expect(toolSet).not.toBeNull()
+    expect(toolSet?.activeAppSummary).toContain('encountered an error and is no longer active')
+    expect(toolSet?.activeAppSummary).toContain('White had a strong kingside attack.')
+    expect(toolSet?.activeAppSummary).toContain('Continue assisting the student without the app.')
+    expect(toolSet?.description).toContain('Continue assisting the student without the app.')
+  })
+
   it('activates the app and records Bridge context when a tool executes', async () => {
     const session: Session = {
       id: 'session-3',

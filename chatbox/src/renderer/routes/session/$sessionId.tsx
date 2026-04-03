@@ -9,6 +9,7 @@ import MessageList, { type MessageListRef } from '@/components/chat/MessageList'
 import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import InputBox from '@/components/InputBox/InputBox'
 import Header from '@/components/layout/Header'
+import ChatBridgeControlPanel from '@/components/session/ChatBridgeControlPanel'
 import ChatBridgePanel from '@/components/session/ChatBridgePanel'
 import ChatBridgeShelf from '@/components/session/ChatBridgeShelf'
 import ThreadHistoryDrawer from '@/components/session/ThreadHistoryDrawer'
@@ -155,6 +156,7 @@ function RouteComponent() {
   return currentSession ? (
     <div className="flex flex-col h-full">
       <Header session={currentSession} />
+      <ChatBridgeControlPanel session={currentSession} />
       <ChatBridgeShelf session={currentSession} />
       <ChatBridgePanel session={currentSession} />
 
