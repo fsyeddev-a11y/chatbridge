@@ -272,8 +272,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
 
     const { appId } = AppIdParamsSchema.parse(request.params)
-    const { reviewState, reviewerId, reviewNotes } = ReviewActionBodySchema.parse(request.body)
-    const updated = await store.updateReviewState(appId, reviewState, reviewerId, reviewNotes)
+    const { reviewState, reviewerId, reviewNotes, version } = ReviewActionBodySchema.parse(request.body)
+    const updated = await store.updateReviewState(appId, reviewState, reviewerId, reviewNotes, version)
     if (!updated) {
       return reply.status(404).send({
         error: 'app_not_found',

@@ -32,6 +32,22 @@ export type AppRegistryEntry = {
   reviewNotes?: string
   ownerUserId?: string
   ownerEmail?: string
+  activeManifest?: AppManifest
+  activeVersion?: string
+  pendingManifest?: AppManifest
+  pendingVersion?: string
+}
+
+export type AppVersionRecord = {
+  appId: string
+  version: string
+  manifest: AppManifest
+  reviewState: ReviewState
+  submittedAt: number
+  reviewedAt?: number
+  reviewNotes?: string
+  ownerUserId?: string
+  ownerEmail?: string
 }
 
 export type ClassAppAllowlist = {

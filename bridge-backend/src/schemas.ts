@@ -44,6 +44,7 @@ export const ReviewStateSchema = z.enum(['pending', 'approved', 'rejected', 'sus
 
 export const ReviewActionBodySchema = z.object({
   reviewState: ReviewStateSchema,
+  version: z.string().min(1).max(40).optional(),
   reviewerId: z.string().min(1).max(100),
   reviewNotes: z.string().max(1000).optional(),
 })

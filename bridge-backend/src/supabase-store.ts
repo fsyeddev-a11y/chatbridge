@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type {
   AppManifest,
   AppRegistryEntry,
+  AppVersionRecord,
   AuditEvent,
   BridgeSessionRecord,
   ClassAppAllowlist,
@@ -15,6 +16,20 @@ type SupabaseBridgeStoreRow = {
   app_id: string
   review_state: AppRegistryEntry['reviewState']
   registered_at: number
+  reviewed_at: number | null
+  review_notes: string | null
+  owner_user_id: string | null
+  owner_email: string | null
+  active_version: string | null
+  manifest: AppManifest
+}
+
+type SupabaseAppVersionRow = {
+  id: string
+  app_id: string
+  version: string
+  review_state: AppVersionRecord['reviewState']
+  submitted_at: number
   reviewed_at: number | null
   review_notes: string | null
   owner_user_id: string | null
@@ -76,6 +91,17 @@ type SupabaseAppContextSnapshotRow = {
   captured_at: number
 }
 
+type RegistryComposition = {
+  appRows: SupabaseBridgeStoreRow[]
+  versionRows: SupabaseAppVersionRow[]
+}
+
+type SupabaseSeedData = {
+  registryEntries: AppRegistryEntry[]
+  appVersions: AppVersionRecord[]
+  classAllowlist: ClassAppAllowlist[]
+}
+
 export function getSupabasePersistenceConfig() {
   return {
     url: process.env.SUPABASE_URL || '',
@@ -102,15 +128,15 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
   return {
     async listRegistryEntries() {
       await ensureSeeded()
-      const rows = await readRegistryRows(client)
-      return rows.map(mapRegistryRow)
+      const { appRows, versionRows } = await readRegistryComposition(client)
+      return composeRegistryEntries(appRows, versionRows)
     },
 
     async listRegistryEntriesForOwner(userId) {
       await ensureSeeded()
-      const { data, error } = await client
+      const { data: appRows, error } = await client
         .from('apps')
-        .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, manifest')
+        .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, active_version, manifest')
         .eq('owner_user_id', userId)
         .order('registered_at', { ascending: false })
         .returns<SupabaseBridgeStoreRow[]>()
@@ -119,14 +145,16 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
         throw error
       }
 
-      return (data || []).map(mapRegistryRow)
+      const appIds = (appRows || []).map((row) => row.app_id)
+      const versionRows = await readVersionRowsForAppIds(client, appIds)
+      return composeRegistryEntries(appRows || [], versionRows)
     },
 
     async getRegistryEntry(appId) {
       await ensureSeeded()
       const { data, error } = await client
         .from('apps')
-        .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, manifest')
+        .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, active_version, manifest')
         .eq('app_id', appId)
         .maybeSingle<SupabaseBridgeStoreRow>()
 
@@ -134,7 +162,12 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
         throw error
       }
 
-      return data ? mapRegistryRow(data) : undefined
+      if (!data) {
+        return undefined
+      }
+
+      const versionRows = await readVersionRowsForAppIds(client, [appId])
+      return composeRegistryEntries([data], versionRows)[0]
     },
 
     async listApprovedAppsForClass(classId) {
@@ -157,7 +190,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 
       const { data: appRows, error: appError } = await client
         .from('apps')
-        .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, manifest')
+        .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, active_version, manifest')
         .in('app_id', enabledAppIds)
         .eq('review_state', 'approved')
         .returns<SupabaseBridgeStoreRow[]>()
@@ -166,7 +199,12 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
         throw appError
       }
 
-      return (appRows || []).map(mapRegistryRow)
+      const versionRows = await readVersionRowsForAppIds(client, enabledAppIds)
+      return composeRegistryEntries(appRows || [], versionRows).map((entry) => ({
+        ...entry,
+        manifest: entry.activeManifest || entry.manifest,
+        reviewState: 'approved',
+      }))
     },
 
     async listClassAllowlist(classId) {
@@ -189,7 +227,28 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
       await ensureSeeded()
       const existing = await this.getRegistryEntry(manifest.appId)
       const now = Date.now()
+      const migratedManifest = migrateManifest(manifest)
+      const versionId = buildVersionRecordId(manifest.appId, manifest.version)
 
+      const versionRow: SupabaseAppVersionRow = {
+        id: versionId,
+        app_id: manifest.appId,
+        version: manifest.version,
+        review_state: 'pending',
+        submitted_at: now,
+        reviewed_at: null,
+        review_notes: null,
+        owner_user_id: owner?.userId ?? existing?.ownerUserId ?? null,
+        owner_email: owner?.email ?? existing?.ownerEmail ?? null,
+        manifest: migratedManifest,
+      }
+
+      const { error: versionError } = await client.from('app_versions').upsert(versionRow, { onConflict: 'app_id,version' })
+      if (versionError) {
+        throw versionError
+      }
+
+      const currentActiveVersion = existing?.activeVersion ?? null
       const row: SupabaseBridgeStoreRow = {
         app_id: manifest.appId,
         review_state: 'pending',
@@ -198,49 +257,74 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
         review_notes: null,
         owner_user_id: owner?.userId ?? existing?.ownerUserId ?? null,
         owner_email: owner?.email ?? existing?.ownerEmail ?? null,
-        manifest: migrateManifest(manifest),
+        active_version: currentActiveVersion,
+        manifest: migratedManifest,
       }
 
-      const { data, error } = await client
-        .from('apps')
-        .upsert(row, { onConflict: 'app_id' })
-        .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, manifest')
-        .single<SupabaseBridgeStoreRow>()
-
-      if (error) {
-        throw error
+      const { error: appError } = await client.from('apps').upsert(row, { onConflict: 'app_id' })
+      if (appError) {
+        throw appError
       }
 
-      return mapRegistryRow(data)
+      return await this.getRegistryEntry(manifest.appId) as AppRegistryEntry
     },
 
-    async updateReviewState(appId, reviewState, reviewerId, reviewNotes) {
+    async updateReviewState(appId, reviewState, reviewerId, reviewNotes, version) {
       await ensureSeeded()
       const existing = await this.getRegistryEntry(appId)
       if (!existing) {
         return undefined
       }
 
+      const versionRows = await readVersionRowsForAppIds(client, [appId])
+      const sortedVersions = versionRows.sort((left, right) => right.submitted_at - left.submitted_at)
+      const targetRow =
+        (version ? sortedVersions.find((candidate) => candidate.version === version) : undefined) ||
+        (existing.pendingVersion ? sortedVersions.find((candidate) => candidate.version === existing.pendingVersion) : undefined) ||
+        sortedVersions.find((candidate) => candidate.version === existing.manifest.version)
+
+      if (!targetRow) {
+        return undefined
+      }
+
       const reviewedAt = Date.now()
-      const { data, error } = await client
-        .from('apps')
+      const { error: versionUpdateError } = await client
+        .from('app_versions')
         .update({
           review_state: reviewState,
           reviewed_at: reviewedAt,
           review_notes: reviewNotes ?? null,
         })
-        .eq('app_id', appId)
-        .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, manifest')
-        .single<SupabaseBridgeStoreRow>()
+        .eq('id', targetRow.id)
 
-      if (error) {
-        throw error
+      if (versionUpdateError) {
+        throw versionUpdateError
+      }
+
+      const refreshedVersionRows = await readVersionRowsForAppIds(client, [appId])
+      const nextAppRow = buildAppRowAfterReview(existing, refreshedVersionRows, targetRow.version, reviewState, reviewNotes, reviewedAt)
+
+      const { error: appUpdateError } = await client
+        .from('apps')
+        .update({
+          review_state: nextAppRow.review_state,
+          reviewed_at: nextAppRow.reviewed_at,
+          review_notes: nextAppRow.review_notes,
+          manifest: nextAppRow.manifest,
+          active_version: nextAppRow.active_version,
+          owner_user_id: nextAppRow.owner_user_id,
+          owner_email: nextAppRow.owner_email,
+        })
+        .eq('app_id', appId)
+
+      if (appUpdateError) {
+        throw appUpdateError
       }
 
       const actionRow: SupabaseReviewActionRow = {
         id: randomUUID(),
         app_id: appId,
-        version: existing.manifest.version,
+        version: targetRow.version,
         action: mapReviewStateToAction(reviewState),
         reviewer_id: reviewerId,
         notes: reviewNotes ?? null,
@@ -252,13 +336,13 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
         throw actionError
       }
 
-      return mapRegistryRow(data)
+      return await this.getRegistryEntry(appId)
     },
 
     async enableAppForClass(classId, appId, enabledBy) {
       await ensureSeeded()
       const appEntry = await this.getRegistryEntry(appId)
-      if (!appEntry || appEntry.reviewState !== 'approved') {
+      if (!appEntry || !appEntry.activeManifest) {
         return undefined
       }
 
@@ -457,6 +541,7 @@ async function bootstrapSeedData(client: SupabaseClient) {
         review_notes: entry.reviewNotes ?? null,
         owner_user_id: entry.ownerUserId ?? null,
         owner_email: entry.ownerEmail ?? null,
+        active_version: entry.activeVersion ?? null,
         manifest: entry.manifest,
       })),
       { onConflict: 'app_id' }
@@ -464,6 +549,29 @@ async function bootstrapSeedData(client: SupabaseClient) {
 
     if (seedAppsError) {
       throw seedAppsError
+    }
+  }
+
+  const missingVersionEntries = await getMissingSeedVersionEntries(client, seedData.appVersions)
+  if (missingVersionEntries.length) {
+    const { error: seedVersionsError } = await client.from('app_versions').upsert(
+      missingVersionEntries.map((entry) => ({
+        id: buildVersionRecordId(entry.appId, entry.version),
+        app_id: entry.appId,
+        version: entry.version,
+        review_state: entry.reviewState,
+        submitted_at: entry.submittedAt,
+        reviewed_at: entry.reviewedAt ?? null,
+        review_notes: entry.reviewNotes ?? null,
+        owner_user_id: entry.ownerUserId ?? null,
+        owner_email: entry.ownerEmail ?? null,
+        manifest: entry.manifest,
+      })),
+      { onConflict: 'app_id,version' }
+    )
+
+    if (seedVersionsError) {
+      throw seedVersionsError
     }
   }
 
@@ -487,10 +595,7 @@ async function bootstrapSeedData(client: SupabaseClient) {
   }
 }
 
-export async function getMissingSeedRegistryEntries(
-  client: SupabaseClient,
-  seedEntries: AppRegistryEntry[]
-) {
+export async function getMissingSeedRegistryEntries(client: SupabaseClient, seedEntries: AppRegistryEntry[]) {
   const seedAppIds = seedEntries.map((entry) => entry.manifest.appId)
   if (!seedAppIds.length) {
     return []
@@ -510,10 +615,27 @@ export async function getMissingSeedRegistryEntries(
   return seedEntries.filter((entry) => !existingAppIds.has(entry.manifest.appId))
 }
 
-export async function getMissingSeedAllowlistEntries(
-  client: SupabaseClient,
-  seedEntries: ClassAppAllowlist[]
-) {
+export async function getMissingSeedVersionEntries(client: SupabaseClient, seedEntries: AppVersionRecord[]) {
+  const seedIds = seedEntries.map((entry) => buildVersionRecordId(entry.appId, entry.version))
+  if (!seedIds.length) {
+    return []
+  }
+
+  const { data: existingRows, error } = await client
+    .from('app_versions')
+    .select('id')
+    .in('id', seedIds)
+    .returns<Array<Pick<SupabaseAppVersionRow, 'id'>>>()
+
+  if (error) {
+    throw error
+  }
+
+  const existingIds = new Set((existingRows || []).map((row) => row.id))
+  return seedEntries.filter((entry) => !existingIds.has(buildVersionRecordId(entry.appId, entry.version)))
+}
+
+export async function getMissingSeedAllowlistEntries(client: SupabaseClient, seedEntries: ClassAppAllowlist[]) {
   const seedIds = seedEntries.map((entry) => `${entry.classId}:${entry.appId}`)
   if (!seedIds.length) {
     return []
@@ -548,10 +670,16 @@ function createSupabaseBridgeStoreClient() {
   })
 }
 
+async function readRegistryComposition(client: SupabaseClient): Promise<RegistryComposition> {
+  const appRows = await readRegistryRows(client)
+  const versionRows = await readVersionRowsForAppIds(client, appRows.map((row) => row.app_id))
+  return { appRows, versionRows }
+}
+
 async function readRegistryRows(client: SupabaseClient) {
   const { data, error } = await client
     .from('apps')
-    .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, manifest')
+    .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, active_version, manifest')
     .order('registered_at', { ascending: true })
     .returns<SupabaseBridgeStoreRow[]>()
 
@@ -562,15 +690,111 @@ async function readRegistryRows(client: SupabaseClient) {
   return data || []
 }
 
-function mapRegistryRow(row: SupabaseBridgeStoreRow): AppRegistryEntry {
+async function readVersionRowsForAppIds(client: SupabaseClient, appIds: string[]) {
+  if (!appIds.length) {
+    return []
+  }
+
+  const { data, error } = await client
+    .from('app_versions')
+    .select('id, app_id, version, review_state, submitted_at, reviewed_at, review_notes, owner_user_id, owner_email, manifest')
+    .in('app_id', appIds)
+    .order('submitted_at', { ascending: false })
+    .returns<SupabaseAppVersionRow[]>()
+
+  if (error) {
+    throw error
+  }
+
+  return data || []
+}
+
+function composeRegistryEntries(appRows: SupabaseBridgeStoreRow[], versionRows: SupabaseAppVersionRow[]) {
+  const versionsByAppId = new Map<string, SupabaseAppVersionRow[]>()
+  for (const versionRow of versionRows) {
+    const current = versionsByAppId.get(versionRow.app_id) || []
+    current.push(versionRow)
+    versionsByAppId.set(versionRow.app_id, current)
+  }
+
+  return appRows
+    .map((row) => buildRegistryEntryFromSupabaseRows(row, versionsByAppId.get(row.app_id) || []))
+    .filter((entry): entry is AppRegistryEntry => Boolean(entry))
+}
+
+function buildRegistryEntryFromSupabaseRows(
+  row: SupabaseBridgeStoreRow,
+  versionRows: SupabaseAppVersionRow[]
+): AppRegistryEntry | undefined {
+  const sortedVersions = [...versionRows].sort((left, right) => right.submitted_at - left.submitted_at)
+  const activeVersionRow =
+    (row.active_version ? sortedVersions.find((version) => version.version === row.active_version) : undefined) ||
+    sortedVersions.find((version) => version.review_state === 'approved')
+  const pendingVersionRow = sortedVersions.find((version) => version.review_state === 'pending')
+  const displayVersionRow =
+    pendingVersionRow ||
+    sortedVersions.find((version) => version.version === row.manifest.version) ||
+    activeVersionRow ||
+    sortedVersions[0]
+
+  if (!displayVersionRow) {
+    return undefined
+  }
+
   return {
-    manifest: migrateManifest(row.manifest),
-    reviewState: row.review_state,
+    manifest: migrateManifest(displayVersionRow.manifest),
+    reviewState: displayVersionRow.review_state,
     registeredAt: row.registered_at,
-    reviewedAt: row.reviewed_at ?? undefined,
-    reviewNotes: row.review_notes ?? undefined,
-    ownerUserId: row.owner_user_id ?? undefined,
-    ownerEmail: row.owner_email ?? undefined,
+    reviewedAt: displayVersionRow.reviewed_at ?? undefined,
+    reviewNotes: displayVersionRow.review_notes ?? undefined,
+    ownerUserId: row.owner_user_id ?? displayVersionRow.owner_user_id ?? undefined,
+    ownerEmail: row.owner_email ?? displayVersionRow.owner_email ?? undefined,
+    activeManifest: activeVersionRow ? migrateManifest(activeVersionRow.manifest) : undefined,
+    activeVersion: activeVersionRow?.version,
+    pendingManifest: pendingVersionRow ? migrateManifest(pendingVersionRow.manifest) : undefined,
+    pendingVersion: pendingVersionRow?.version,
+  }
+}
+
+function buildAppRowAfterReview(
+  existing: AppRegistryEntry,
+  versionRows: SupabaseAppVersionRow[],
+  reviewedVersion: string,
+  reviewState: AppRegistryEntry['reviewState'],
+  reviewNotes: string | undefined,
+  reviewedAt: number
+): SupabaseBridgeStoreRow {
+  const sortedVersions = [...versionRows].sort((left, right) => right.submitted_at - left.submitted_at)
+  const targetVersionRow = sortedVersions.find((row) => row.version === reviewedVersion)
+  const approvedVersions = sortedVersions.filter((row) => row.review_state === 'approved')
+  const activeVersionRow =
+    reviewState === 'approved'
+      ? targetVersionRow
+      : approvedVersions.find((row) => row.version === existing.activeVersion) || approvedVersions[0]
+
+  const displayVersionRow =
+    reviewState === 'approved'
+      ? targetVersionRow
+      : activeVersionRow ||
+        sortedVersions.find((row) => row.version === reviewedVersion) ||
+        sortedVersions.find((row) => row.review_state === 'pending') ||
+        sortedVersions[0]
+
+  if (!displayVersionRow) {
+    throw new Error(`Unable to rebuild app row for ${existing.manifest.appId}`)
+  }
+
+  return {
+    app_id: existing.manifest.appId,
+    review_state: activeVersionRow ? 'approved' : displayVersionRow.review_state,
+    registered_at: existing.registeredAt,
+    reviewed_at: reviewState === 'approved' || !activeVersionRow ? reviewedAt : activeVersionRow.reviewed_at ?? reviewedAt,
+    review_notes:
+      reviewState === 'approved' || !activeVersionRow ? reviewNotes ?? null : activeVersionRow.review_notes ?? null,
+    owner_user_id: existing.ownerUserId ?? targetVersionRow?.owner_user_id ?? null,
+    owner_email: existing.ownerEmail ?? targetVersionRow?.owner_email ?? null,
+    active_version: activeVersionRow?.version ?? null,
+    manifest: migrateManifest((activeVersionRow || displayVersionRow).manifest),
   }
 }
 
@@ -639,95 +863,102 @@ export function buildAppContextSnapshotRows(
   }))
 }
 
-function createSupabaseSeedData() {
+function createSupabaseSeedData(): SupabaseSeedData {
   const now = Date.now()
   const weatherAppUrl = getConfiguredWeatherAppUrl()
   const weatherAllowedOrigins = getAllowedOriginsForLaunchUrl(weatherAppUrl)
 
+  const manifests = ([
+    {
+      appId: 'chess',
+      name: 'Chess Coach',
+      version: '1.0.0',
+      description: 'Interactive chess board with guided tutoring.',
+      developerName: 'ChatBridge Demo',
+      executionModel: 'iframe',
+      allowedOrigins: ['https://apps.chatbridge.local'],
+      authType: 'none',
+      subjectTags: ['Strategy', 'Logic'],
+      gradeBand: '3-12',
+      llmSafeFields: ['phase', 'fen'],
+      tools: [
+        {
+          name: 'chatbridge_chess_start_game',
+          description: 'Start a new chess game for the current student.',
+        },
+        {
+          name: 'chatbridge_chess_get_hint',
+          description: 'Get a tutoring hint for the current board position.',
+        },
+      ],
+    },
+    {
+      appId: 'weather',
+      name: 'Weather Dashboard',
+      version: '1.0.0',
+      description: 'Lightweight public weather app for quick lookups.',
+      developerName: 'ChatBridge Demo',
+      executionModel: 'iframe',
+      launchUrl: weatherAppUrl,
+      allowedOrigins: weatherAllowedOrigins,
+      heartbeatTimeoutMs: 10000,
+      authType: 'none',
+      subjectTags: ['Science'],
+      gradeBand: 'K-12',
+      llmSafeFields: ['location', 'conditions', 'temperatureF'],
+      tools: [
+        {
+          name: 'chatbridge_weather_lookup',
+          description: 'Look up current weather for a student-selected location.',
+        },
+      ],
+    },
+    {
+      appId: 'google-classroom',
+      name: 'Google Classroom Assistant',
+      version: '1.0.0',
+      description: 'Read-only classroom context for due dates and coursework.',
+      developerName: 'ChatBridge Demo',
+      executionModel: 'iframe',
+      allowedOrigins: ['https://apps.chatbridge.local'],
+      authType: 'oauth2',
+      subjectTags: ['Productivity', 'Classroom'],
+      gradeBand: '3-12',
+      llmSafeFields: ['courseCount', 'upcomingAssignments'],
+      tools: [
+        {
+          name: 'chatbridge_google_classroom_overview',
+          description: 'Retrieve a read-only summary of the student classroom workload.',
+        },
+      ],
+    },
+  ] satisfies AppManifest[]).map((manifest) => migrateManifest(manifest))
+
+  const appVersions: AppVersionRecord[] = manifests.map((manifest) => ({
+    appId: manifest.appId,
+    version: manifest.version,
+    manifest,
+    reviewState: 'approved',
+    submittedAt: now,
+    reviewedAt: now,
+    ownerUserId: 'system-demo',
+    ownerEmail: 'demo@chatbridge.local',
+  }))
+
+  const registryEntries: AppRegistryEntry[] = manifests.map((manifest) => ({
+    manifest,
+    reviewState: 'approved',
+    registeredAt: now,
+    reviewedAt: now,
+    ownerUserId: 'system-demo',
+    ownerEmail: 'demo@chatbridge.local',
+    activeManifest: manifest,
+    activeVersion: manifest.version,
+  }))
+
   return {
-    registryEntries: [
-      {
-        reviewState: 'approved' as const,
-        registeredAt: now,
-        reviewedAt: now,
-        reviewNotes: undefined,
-        manifest: {
-          appId: 'chess',
-          name: 'Chess Coach',
-          version: '1.0.0',
-          description: 'Interactive chess board with guided tutoring.',
-          developerName: 'ChatBridge Demo',
-          executionModel: 'iframe' as const,
-          allowedOrigins: ['https://apps.chatbridge.local'],
-          authType: 'none' as const,
-          subjectTags: ['Strategy', 'Logic'],
-          gradeBand: '3-12',
-          llmSafeFields: ['phase', 'fen'],
-          tools: [
-            {
-              name: 'chatbridge_chess_start_game',
-              description: 'Start a new chess game for the current student.',
-            },
-            {
-              name: 'chatbridge_chess_get_hint',
-              description: 'Get a tutoring hint for the current board position.',
-            },
-          ],
-        },
-      },
-      {
-        reviewState: 'approved' as const,
-        registeredAt: now,
-        reviewedAt: now,
-        reviewNotes: undefined,
-        manifest: {
-          appId: 'weather',
-          name: 'Weather Dashboard',
-          version: '1.0.0',
-          description: 'Lightweight public weather app for quick lookups.',
-          developerName: 'ChatBridge Demo',
-          executionModel: 'iframe' as const,
-          launchUrl: weatherAppUrl,
-          allowedOrigins: weatherAllowedOrigins,
-          heartbeatTimeoutMs: 10000,
-          authType: 'none' as const,
-          subjectTags: ['Science'],
-          gradeBand: 'K-12',
-          llmSafeFields: ['location', 'conditions', 'temperatureF'],
-          tools: [
-            {
-              name: 'chatbridge_weather_lookup',
-              description: 'Look up current weather for a student-selected location.',
-            },
-          ],
-        },
-      },
-      {
-        reviewState: 'approved' as const,
-        registeredAt: now,
-        reviewedAt: now,
-        reviewNotes: undefined,
-        manifest: {
-          appId: 'google-classroom',
-          name: 'Google Classroom Assistant',
-          version: '1.0.0',
-          description: 'Read-only classroom context for due dates and coursework.',
-          developerName: 'ChatBridge Demo',
-          executionModel: 'iframe' as const,
-          allowedOrigins: ['https://apps.chatbridge.local'],
-          authType: 'oauth2' as const,
-          subjectTags: ['Productivity', 'Classroom'],
-          gradeBand: '3-12',
-          llmSafeFields: ['courseCount', 'upcomingAssignments'],
-          tools: [
-            {
-              name: 'chatbridge_google_classroom_overview',
-              description: 'Retrieve a read-only summary of the student classroom workload.',
-            },
-          ],
-        },
-      },
-    ],
+    registryEntries,
+    appVersions,
     classAllowlist: [
       { classId: 'demo-class', appId: 'chess', enabledBy: 'teacher-demo', enabledAt: now, disabledAt: undefined },
       { classId: 'demo-class', appId: 'weather', enabledBy: 'teacher-demo', enabledAt: now, disabledAt: undefined },
@@ -758,6 +989,10 @@ function migrateManifest(manifest: AppManifest): AppManifest {
         : getAllowedOriginsForLaunchUrl(launchUrl),
     heartbeatTimeoutMs: manifest.heartbeatTimeoutMs || 10000,
   }
+}
+
+function buildVersionRecordId(appId: string, version: string) {
+  return `${appId}:${version}`
 }
 
 function mapReviewStateToAction(reviewState: AppRegistryEntry['reviewState']): ReviewAction['action'] {

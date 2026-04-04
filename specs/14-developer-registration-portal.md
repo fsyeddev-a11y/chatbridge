@@ -12,10 +12,11 @@
   - internal control-plane registration action
   - developer-owned app dashboard
   - owner-scoped review feedback and review-history visibility
-- Not implemented yet:
-  - developer-facing auth
   - version-safe resubmission flow
   - explicit approved-vs-pending version coexistence
+- Not implemented yet:
+  - developer-facing auth
+  - versioned rollout, rollback, and migration guidance for developers
 
 ## Context
 

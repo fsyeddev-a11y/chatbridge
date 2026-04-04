@@ -4,13 +4,31 @@ create table if not exists apps (
   registered_at bigint not null,
   reviewed_at bigint,
   review_notes text,
+  active_version text,
   owner_user_id text,
   owner_email text,
   manifest jsonb not null
 );
 
+alter table apps add column if not exists active_version text;
 alter table apps add column if not exists owner_user_id text;
 alter table apps add column if not exists owner_email text;
+
+create table if not exists app_versions (
+  id text primary key,
+  app_id text not null references apps(app_id) on delete cascade,
+  version text not null,
+  review_state text not null check (review_state in ('pending', 'approved', 'rejected', 'suspended')),
+  submitted_at bigint not null,
+  reviewed_at bigint,
+  review_notes text,
+  owner_user_id text,
+  owner_email text,
+  manifest jsonb not null
+);
+
+create unique index if not exists app_versions_app_id_version_idx on app_versions(app_id, version);
+create index if not exists app_versions_app_id_idx on app_versions(app_id);
 
 create table if not exists review_actions (
   id text primary key,

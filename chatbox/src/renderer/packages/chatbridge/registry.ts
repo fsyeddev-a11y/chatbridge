@@ -13,6 +13,8 @@ export type ChatBridgeAppDefinition = BridgeAppManifest & {
   reviewNotes?: string
   reviewedAt?: number
   registeredAt?: number
+  activeVersion?: string
+  pendingVersion?: string
 }
 
 export type ChatBridgeAllowlistEntry = {
@@ -41,6 +43,8 @@ type RegistryApiResponse = {
     reviewNotes?: string
     reviewedAt?: number
     registeredAt?: number
+    activeVersion?: string
+    pendingVersion?: string
   }>
 }
 
@@ -66,6 +70,8 @@ type RegistryAppResponse = {
     reviewNotes?: string
     reviewedAt?: number
     registeredAt?: number
+    activeVersion?: string
+    pendingVersion?: string
   }
 }
 
@@ -214,6 +220,8 @@ function normalizeRegistryEntries(entries: RegistryApiResponse['apps']): ChatBri
       reviewNotes: entry.reviewNotes,
       reviewedAt: entry.reviewedAt,
       registeredAt: entry.registeredAt,
+      activeVersion: entry.activeVersion,
+      pendingVersion: entry.pendingVersion,
     })
   )
 }
@@ -407,6 +415,8 @@ export async function registerChatBridgeApp(manifest: BridgeAppManifest) {
     reviewNotes: response.app.reviewNotes,
     reviewedAt: response.app.reviewedAt,
     registeredAt: response.app.registeredAt,
+    activeVersion: response.app.activeVersion,
+    pendingVersion: response.app.pendingVersion,
   })
 }
 
@@ -416,6 +426,7 @@ export async function reviewChatBridgeApp(
     reviewState: ChatBridgeAppDefinition['reviewState']
     reviewerId: string
     reviewNotes?: string
+    version?: string
   }
 ) {
   const response = await sendJson<RegistryAppResponse>(`/api/registry/apps/${appId}/review`, 'POST', input)
@@ -428,6 +439,8 @@ export async function reviewChatBridgeApp(
     reviewNotes: response.app.reviewNotes,
     reviewedAt: response.app.reviewedAt,
     registeredAt: response.app.registeredAt,
+    activeVersion: response.app.activeVersion,
+    pendingVersion: response.app.pendingVersion,
   })
 }
 

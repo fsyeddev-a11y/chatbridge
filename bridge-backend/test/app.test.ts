@@ -298,6 +298,187 @@ describe('bridge-backend app', () => {
     )
   })
 
+  it('keeps the active approved version live while a newer submission stays pending', async () => {
+    const store = createInMemoryBridgeStore()
+    await store.registerApp(
+      {
+        appId: 'story-builder',
+        name: 'AI Story Builder',
+        version: '1.0.0',
+        description: 'Structured story building for students.',
+        developerName: 'Developer',
+        executionModel: 'iframe',
+        allowedOrigins: ['https://apps.example.com'],
+        authType: 'none',
+        subjectTags: ['ELA'],
+        llmSafeFields: ['chapterTitle'],
+        tools: [
+          {
+            name: 'chatbridge_story_builder_open',
+            description: 'Open the story builder.',
+          },
+        ],
+      },
+      {
+        userId: 'user-1',
+        email: 'tester@example.com',
+      }
+    )
+    await store.updateReviewState('story-builder', 'approved', 'admin-1', 'Initial release approved.', '1.0.0')
+    await store.enableAppForClass('demo-class', 'story-builder', 'teacher-1')
+
+    await store.registerApp(
+      {
+        appId: 'story-builder',
+        name: 'AI Story Builder',
+        version: '1.1.0',
+        description: 'Structured story building for students with revision mode.',
+        developerName: 'Developer',
+        executionModel: 'iframe',
+        allowedOrigins: ['https://apps.example.com'],
+        authType: 'none',
+        subjectTags: ['ELA'],
+        llmSafeFields: ['chapterTitle'],
+        tools: [
+          {
+            name: 'chatbridge_story_builder_open',
+            description: 'Open the story builder.',
+          },
+        ],
+      },
+      {
+        userId: 'user-1',
+        email: 'tester@example.com',
+      }
+    )
+
+    const app = createApp({ store, authVerifier: allowAllAuth, chatClient: fakeChatClient })
+    const developerResponse = await app.inject({
+      method: 'GET',
+      url: '/api/developer/apps',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+    const classAppsResponse = await app.inject({
+      method: 'GET',
+      url: '/api/classes/demo-class/apps',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(developerResponse.statusCode, 200)
+    assert.equal(classAppsResponse.statusCode, 200)
+
+    const developerApp = developerResponse
+      .json()
+      .apps.find((entry: { manifest: { appId: string } }) => entry.manifest.appId === 'story-builder') as {
+      manifest: { version: string }
+      activeVersion?: string
+      pendingVersion?: string
+      reviewState: string
+    }
+    const liveClassApp = classAppsResponse
+      .json()
+      .apps.find((entry: { manifest: { appId: string } }) => entry.manifest.appId === 'story-builder') as {
+      manifest: { version: string }
+    }
+
+    assert.equal(developerApp.reviewState, 'pending')
+    assert.equal(developerApp.manifest.version, '1.1.0')
+    assert.equal(developerApp.activeVersion, '1.0.0')
+    assert.equal(developerApp.pendingVersion, '1.1.0')
+    assert.equal(liveClassApp.manifest.version, '1.0.0')
+  })
+
+  it('approves a specific submitted version without losing the currently active one first', async () => {
+    const store = createInMemoryBridgeStore()
+    await store.registerApp(
+      {
+        appId: 'story-builder',
+        name: 'AI Story Builder',
+        version: '1.0.0',
+        description: 'Structured story building for students.',
+        developerName: 'Developer',
+        executionModel: 'iframe',
+        allowedOrigins: ['https://apps.example.com'],
+        authType: 'none',
+        subjectTags: ['ELA'],
+        llmSafeFields: ['chapterTitle'],
+        tools: [
+          {
+            name: 'chatbridge_story_builder_open',
+            description: 'Open the story builder.',
+          },
+        ],
+      },
+      {
+        userId: 'user-1',
+        email: 'tester@example.com',
+      }
+    )
+    await store.updateReviewState('story-builder', 'approved', 'admin-1', 'Initial release approved.', '1.0.0')
+    await store.enableAppForClass('demo-class', 'story-builder', 'teacher-1')
+    await store.registerApp(
+      {
+        appId: 'story-builder',
+        name: 'AI Story Builder',
+        version: '1.1.0',
+        description: 'Structured story building for students with revision mode.',
+        developerName: 'Developer',
+        executionModel: 'iframe',
+        allowedOrigins: ['https://apps.example.com'],
+        authType: 'none',
+        subjectTags: ['ELA'],
+        llmSafeFields: ['chapterTitle'],
+        tools: [
+          {
+            name: 'chatbridge_story_builder_open',
+            description: 'Open the story builder.',
+          },
+        ],
+      },
+      {
+        userId: 'user-1',
+        email: 'tester@example.com',
+      }
+    )
+
+    const app = createApp({ store, authVerifier: allowAllAuth, chatClient: fakeChatClient })
+    const reviewResponse = await app.inject({
+      method: 'POST',
+      url: '/api/registry/apps/story-builder/review',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        reviewState: 'approved',
+        reviewerId: 'admin-1',
+        reviewNotes: 'Revision mode approved.',
+        version: '1.1.0',
+      },
+    })
+    const classAppsResponse = await app.inject({
+      method: 'GET',
+      url: '/api/classes/demo-class/apps',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(reviewResponse.statusCode, 200)
+    assert.equal(reviewResponse.json().app.manifest.version, '1.1.0')
+    assert.equal(reviewResponse.json().app.activeVersion, '1.1.0')
+    assert.equal(classAppsResponse.statusCode, 200)
+    assert.equal(
+      classAppsResponse
+        .json()
+        .apps.find((entry: { manifest: { appId: string } }) => entry.manifest.appId === 'story-builder')?.manifest.version,
+      '1.1.0'
+    )
+  })
+
   it('returns only developer review actions for owned apps', async () => {
     const store = createInMemoryBridgeStore()
     await store.registerApp(

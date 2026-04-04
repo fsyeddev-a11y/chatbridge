@@ -35,6 +35,7 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [ ] `13` Additional real apps beyond Weather
 - [x] `14` Developer self-serve manifest submission and owned apps
 - [x] `14` Developer review feedback loop
+- [x] `14` Version-safe developer resubmissions
 - [ ] `14` Developer-facing registration portal
 - [x] `15` Rate limiting and abuse controls
 - [x] `16` Web-only build path

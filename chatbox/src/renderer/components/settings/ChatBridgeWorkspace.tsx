@@ -56,6 +56,26 @@ function formatTimestamp(timestamp?: number) {
   }).format(timestamp)
 }
 
+function formatVersionStatus(app: {
+  version: string
+  activeVersion?: string
+  pendingVersion?: string
+}) {
+  if (app.activeVersion && app.pendingVersion && app.activeVersion !== app.pendingVersion) {
+    return `Live v${app.activeVersion} • Pending v${app.pendingVersion}`
+  }
+
+  if (app.pendingVersion) {
+    return `Pending v${app.pendingVersion}`
+  }
+
+  if (app.activeVersion) {
+    return `Live v${app.activeVersion}`
+  }
+
+  return `v${app.version}`
+}
+
 export default function ChatBridgeWorkspace() {
   const [classId, setClassId] = useState('demo-class')
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all')
@@ -117,10 +137,16 @@ export default function ChatBridgeWorkspace() {
   })
 
   const reviewMutation = useMutation({
-    mutationFn: (input: { appId: string; reviewState: 'approved' | 'suspended' | 'rejected'; appName: string }) =>
+    mutationFn: (input: {
+      appId: string
+      reviewState: 'approved' | 'suspended' | 'rejected'
+      appName: string
+      version?: string
+    }) =>
       reviewChatBridgeApp(input.appId, {
         reviewState: input.reviewState,
         reviewerId: DEFAULT_REVIEWER_ID,
+        version: input.version,
         reviewNotes:
           input.reviewState === 'approved'
             ? 'Approved from the ChatBridge settings workspace.'
@@ -207,7 +233,7 @@ export default function ChatBridgeWorkspace() {
                       <div>
                         <Text fw={600}>{app.name}</Text>
                         <Text size="xs" c="dimmed">
-                          {app.appId} • v{app.version}
+                          {app.appId} • {formatVersionStatus(app)}
                         </Text>
                       </div>
                       <Badge variant="light">{app.reviewState}</Badge>
@@ -310,7 +336,7 @@ export default function ChatBridgeWorkspace() {
                     </Group>
 
                     <Text size="xs" c="dimmed">
-                      {app.appId} • v{app.version} • {app.developerName}
+                      {app.appId} • {formatVersionStatus(app)} • {app.developerName}
                     </Text>
 
                     <Group gap={8}>
@@ -324,6 +350,7 @@ export default function ChatBridgeWorkspace() {
                             appId: app.appId,
                             appName: app.name,
                             reviewState: 'approved',
+                            version: app.pendingVersion || app.version,
                           })
                         }
                       >
@@ -340,6 +367,7 @@ export default function ChatBridgeWorkspace() {
                             appId: app.appId,
                             appName: app.name,
                             reviewState: 'suspended',
+                            version: app.pendingVersion || app.version,
                           })
                         }
                       >
@@ -356,6 +384,7 @@ export default function ChatBridgeWorkspace() {
                             appId: app.appId,
                             appName: app.name,
                             reviewState: 'rejected',
+                            version: app.pendingVersion || app.version,
                           })
                         }
                       >
