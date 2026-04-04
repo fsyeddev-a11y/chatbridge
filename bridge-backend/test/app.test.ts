@@ -553,6 +553,47 @@ describe('bridge-backend app', () => {
     assert.equal(auditEvents.at(-1)?.eventType, 'ModelInvocationFailed')
   })
 
+  it('executes approved ChatBridge tools through the backend and returns updated bridge state', async () => {
+    const store = createInMemoryBridgeStore()
+    const toolCallingChatClient: ChatCompletionClient = async ({ tools }) => {
+      const weatherTool = tools?.find((tool) => tool.name === 'chatbridge_weather_lookup')
+      assert.ok(weatherTool)
+      const toolResult = await weatherTool.execute()
+      return {
+        content: `I opened ${toolResult.appName} for the student.`,
+        model: 'gpt-4o-mini',
+        toolResults: [toolResult],
+      }
+    }
+
+    const app = createApp({ store, authVerifier: allowAllAuth, chatClient: toolCallingChatClient })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        sessionId: 'session-tools-1',
+        classId: 'demo-class',
+        messages: [{ role: 'user', content: 'Open the weather app for Austin.' }],
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    const payload = response.json()
+    assert.equal(payload.content, 'I opened Weather Dashboard for the student.')
+    assert.equal(payload.toolResults?.[0]?.toolName, 'chatbridge_weather_lookup')
+    assert.equal(payload.bridgeState?.activeAppId, 'weather')
+    assert.equal(payload.bridgeState?.appContext?.weather?.status, 'active')
+
+    const persistedBridgeState = await store.getBridgeSessionState('session-tools-1', 'user-1')
+    assert.equal(persistedBridgeState?.activeAppId, 'weather')
+
+    const auditEvents = await store.listAuditEvents()
+    assert.equal(auditEvents.some((event) => event.eventType === 'ChatBridgeToolInvoked'), true)
+  })
+
   it('rate-limits backend chat generation when configured', async () => {
     const app = createApp({
       store: createInMemoryBridgeStore(),

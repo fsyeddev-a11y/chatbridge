@@ -229,6 +229,12 @@ export async function generate(
             sessionId,
             classId: bridgeState.activeClassId,
           })
+          if (backendResult.bridgeState) {
+            await chatStore.updateSessionWithMessages(sessionId, (currentSession) => ({
+              ...currentSession,
+              bridgeState: backendResult.bridgeState,
+            }))
+          }
           firstTokenLatency = Date.now() - startTime
           targetMsg = {
             ...targetMsg,

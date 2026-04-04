@@ -1,5 +1,6 @@
 import { getMessageText } from '@shared/utils/message'
 import type { Message } from '@shared/types'
+import type { SessionBridgeState } from '@shared/types'
 import { getSupabaseAuthHeaders } from '@/packages/supabase'
 
 const CHATBRIDGE_API_ORIGIN = process.env.CHATBRIDGE_API_ORIGIN || 'http://localhost:8787'
@@ -7,6 +8,7 @@ const CHATBRIDGE_API_ORIGIN = process.env.CHATBRIDGE_API_ORIGIN || 'http://local
 export type BackendChatResult = {
   content: string
   model: string
+  bridgeState?: SessionBridgeState
 }
 
 export async function generateBackendChat(

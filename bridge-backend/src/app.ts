@@ -4,6 +4,7 @@ import { ZodError } from 'zod'
 import { createSupabaseAuthVerifier, getBearerToken, type AuthVerifier } from './auth.js'
 import { createOpenAIChatClient, type ChatCompletionClient } from './chat.js'
 import { prependChatBridgeOrchestrationMessage } from './chatbridge-orchestration.js'
+import { createChatBridgeToolDefinitions } from './chatbridge-tools.js'
 import {
   createConfiguredChatRateLimiterSet,
   createConfiguredMutationRateLimiterSet,
@@ -367,6 +368,15 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       approvedApps,
       bridgeState,
     })
+    const toolDefinitions = await createChatBridgeToolDefinitions({
+      approvedApps,
+      store,
+      sessionId: body.sessionId,
+      userId: authenticatedUserId,
+      classId: effectiveClassId,
+      bridgeState,
+      traceId,
+    })
 
     await store.appendAuditEvent({
       timestamp: Date.now(),
@@ -387,7 +397,10 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     try {
       const response = await chatClient({
         messages: orchestratedMessages,
+        tools: toolDefinitions,
       })
+      const updatedBridgeState =
+        body.sessionId && authenticatedUserId ? await store.getBridgeSessionState(body.sessionId, authenticatedUserId) : undefined
 
       await store.appendAuditEvent({
         timestamp: Date.now(),
@@ -406,7 +419,10 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
         },
       })
 
-      return reply.send(response)
+      return reply.send({
+        ...response,
+        bridgeState: updatedBridgeState,
+      })
     } catch (error) {
       await store.appendAuditEvent({
         timestamp: Date.now(),
