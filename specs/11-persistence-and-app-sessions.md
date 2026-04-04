@@ -164,6 +164,39 @@ frontend opens session
 - Schema tests verify required foreign-key or reference fields exist for user/session relations.
 - Manual query checks verify audit records can be filtered by user and class.
 
+---
+
+### Future Spec Note: Distinguish user-closed apps from completed apps
+
+**Why this needs a future spec**
+
+Today, manually closing an app clears `activeAppId`, but it does not create a distinct durable terminal state such as `closed` or `terminated`. That means backend snapshots can correctly show that no app is currently open, while the last stored `appContext.status` may still read as `ready` or `active`. This is acceptable for the current prototype, but it is not expressive enough for long-term audit, recovery, and UX semantics.
+
+**Future requirements**
+
+- The platform should distinguish:
+  - app finished its task (`complete`)
+  - app failed (`error`)
+  - app was explicitly closed by the student or teacher (`closed` / `terminated`)
+- Manual close actions should produce durable metadata or status transitions in backend session persistence and app-context snapshots.
+- LLM-visible summaries should be able to tell the difference between:
+  - "the app completed"
+  - "the app is unavailable"
+  - "the app was closed by the user"
+- Audit and snapshot queries should support filtering for user-closed apps separately from completed sessions.
+
+**Dependencies**
+
+- Depends on: `02-postmessage-protocol.md`, `05-error-recovery-and-resilience.md`, `08-observability-and-tracing.md`
+- Informs: future lifecycle/audit refinement work under this epic and `05-error-recovery-and-resilience.md`
+
+**Acceptance Criteria for the future slice**
+
+- Closing an app creates a durable backend-visible state change distinct from `complete`.
+- Reload recovery reflects that the app was previously closed, not completed.
+- Snapshot history and audit events record manual close actions explicitly.
+- TutorMeAI can continue without the app while preserving correct semantic history.
+
 ## Out of Scope
 
 - analytics warehouse design

@@ -1,5 +1,5 @@
 import NiceModal from '@ebay/nice-modal-react'
-import { Alert, Button } from '@mantine/core'
+import { Button } from '@mantine/core'
 import type { Message, ModelProvider } from '@shared/types'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { ForwardedRef, useCallback, useEffect, useMemo, useRef } from 'react'
@@ -12,7 +12,6 @@ import Header from '@/components/layout/Header'
 import ChatBridgePanel from '@/components/session/ChatBridgePanel'
 import ChatBridgeShelf from '@/components/session/ChatBridgeShelf'
 import ThreadHistoryDrawer from '@/components/session/ThreadHistoryDrawer'
-import { navigateToSettings } from '@/modals/Settings'
 import { hydrateBridgeStateFromBackend } from '@/packages/chatbridge/session'
 import { updateSession as updateSessionStore, useSession } from '@/stores/chatStore'
 import { lastUsedModelStore } from '@/stores/lastUsedModelStore'
@@ -173,13 +172,6 @@ function RouteComponent() {
   return currentSession ? (
     <div className="flex flex-col h-full">
       <Header session={currentSession} />
-      <Alert color="blue" variant="light" className="mx-3 mt-3 sm:mx-4">
-        ChatBridge review and class controls now live in{' '}
-        <button className="font-semibold underline" onClick={() => navigateToSettings('/settings/chatbridge')}>
-          Settings -&gt; ChatBridge
-        </button>
-        .
-      </Alert>
       <ChatBridgeShelf session={currentSession} />
       <ChatBridgePanel session={currentSession} />
 
