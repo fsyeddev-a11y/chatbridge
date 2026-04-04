@@ -18,6 +18,15 @@ export type ChatBridgeAllowlistEntry = {
   disabledAt?: number
 }
 
+export type ChatBridgeReviewAction = {
+  appId: string
+  version: string
+  action: 'approve' | 'reject' | 'suspend' | 'request_changes'
+  reviewerId: string
+  notes?: string
+  timestamp: number
+}
+
 type RegistryApiResponse = {
   apps: Array<{
     manifest: BridgeAppManifest
@@ -43,6 +52,10 @@ type RegistryAppResponse = {
     manifest: BridgeAppManifest
     reviewState: ChatBridgeAppDefinition['reviewState']
   }
+}
+
+type ReviewActionsApiResponse = {
+  actions: ChatBridgeReviewAction[]
 }
 
 const CHATBRIDGE_API_ORIGIN = process.env.CHATBRIDGE_API_ORIGIN || 'http://localhost:8787'
@@ -141,6 +154,7 @@ export const ChatBridgeQueryKeys = {
   ChatBridgeApps: ['chatbridge', 'apps'],
   ChatBridgeClassApps: (classId: string) => ['chatbridge', 'class-apps', classId],
   ChatBridgeClassAllowlist: (classId: string) => ['chatbridge', 'class-allowlist', classId],
+  ChatBridgeReviewActions: ['chatbridge', 'review-actions'],
 }
 
 function getFallbackRegistry() {
@@ -301,6 +315,24 @@ export function useChatBridgeAllowlist(classId: string) {
     queryFn: () => fetchChatBridgeAllowlist(classId),
     staleTime: 30_000,
     enabled: !!classId,
+  })
+}
+
+export async function fetchChatBridgeReviewActions(): Promise<ChatBridgeReviewAction[]> {
+  try {
+    const response = await fetchJson<ReviewActionsApiResponse>('/api/review-actions')
+    return response.actions
+  } catch (error) {
+    console.warn('Falling back to empty ChatBridge review history', error)
+    return []
+  }
+}
+
+export function useChatBridgeReviewActions() {
+  return useQuery({
+    queryKey: ChatBridgeQueryKeys.ChatBridgeReviewActions,
+    queryFn: fetchChatBridgeReviewActions,
+    staleTime: 30_000,
   })
 }
 

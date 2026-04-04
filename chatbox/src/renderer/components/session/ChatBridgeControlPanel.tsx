@@ -4,6 +4,11 @@ import { useMutation } from '@tanstack/react-query'
 import { IconChecklist, IconChevronDown, IconChevronRight, IconShieldCheck, IconSparkles } from '@tabler/icons-react'
 import { useMemo, useState } from 'react'
 import {
+  DEFAULT_REVIEWER_ID,
+  DEFAULT_TEACHER_ID,
+  DEMO_STORY_BUILDER_MANIFEST,
+} from '@/packages/chatbridge/control-plane'
+import {
   disableChatBridgeAppForClass,
   enableChatBridgeAppForClass,
   registerChatBridgeApp,
@@ -16,30 +21,6 @@ import { getSessionBridgeState } from '@/packages/chatbridge/session'
 type ChatBridgeControlPanelProps = {
   session: Session
 }
-
-const DEMO_STORY_BUILDER_MANIFEST = {
-  appId: 'story-builder',
-  name: 'AI Story Builder',
-  version: '1.0.0',
-  description: 'Structured storytelling workspace that keeps TutorMeAI in charge of prompting and guardrails.',
-  developerName: 'ChatBridge Demo',
-  executionModel: 'iframe' as const,
-  launchUrl: 'https://apps.chatbridge.local/story-builder',
-  allowedOrigins: ['https://apps.chatbridge.local'],
-  authType: 'none' as const,
-  subjectTags: ['ELA', 'Creative Writing'],
-  gradeBand: '3-8',
-  llmSafeFields: ['storyTitle', 'chapterCount', 'draftStatus'],
-  tools: [
-    {
-      name: 'chatbridge_story_builder_open',
-      description: 'Open the structured AI story builder for the current student.',
-    },
-  ],
-}
-
-const DEFAULT_TEACHER_ID = 'teacher-demo'
-const DEFAULT_REVIEWER_ID = 'platform-admin'
 
 export default function ChatBridgeControlPanel({ session }: ChatBridgeControlPanelProps) {
   const bridgeState = useMemo(() => getSessionBridgeState(session), [session])

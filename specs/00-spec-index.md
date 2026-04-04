@@ -29,7 +29,7 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [ ] `10` Backend-side tool orchestration
 - [ ] `11` Supabase/Postgres-backed control-plane persistence
 - [ ] `11` Backend-owned app/session state
-- [ ] `12` Dedicated teacher/admin surfaces
+- [x] `12` Dedicated teacher/admin surfaces
 - [ ] `13` Additional real apps beyond Weather
 - [ ] `14` Developer-facing registration portal
 - [ ] `15` Rate limiting and abuse controls
