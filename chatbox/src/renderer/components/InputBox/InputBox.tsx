@@ -458,7 +458,7 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
       }
 
       // 未选择模型时 显示error tip
-      if (!model) {
+      if (!model && !USE_CHATBRIDGE_BACKEND_CHAT) {
         // 如果不延时执行，会导致error tip 立即消失
         await delay(100)
         if (closeSelectModelErrorTipCb.current) {
