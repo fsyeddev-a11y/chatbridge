@@ -139,6 +139,7 @@ describe('ChatBridgeControlPanel', () => {
     renderPanel()
 
     expect(screen.getByText('ChatBridge Control Plane')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Expand ChatBridge control plane' }))
     expect(screen.getByText('Developer/Admin')).toBeTruthy()
     expect(screen.getByText('Teacher Allowlist')).toBeTruthy()
     expect(screen.getAllByText('Chess Coach')).toHaveLength(2)
@@ -148,10 +149,19 @@ describe('ChatBridgeControlPanel', () => {
   it('calls the teacher allowlist mutation with the active class context', async () => {
     renderPanel()
 
+    fireEvent.click(screen.getByRole('button', { name: 'Expand ChatBridge control plane' }))
     fireEvent.click(screen.getByRole('button', { name: 'Enable' }))
 
     await waitFor(() => {
       expect(enableChatBridgeAppForClassMock).toHaveBeenCalledWith('demo-class', 'chess', 'teacher-demo')
     })
+  })
+
+  it('starts collapsed and expands on toggle', () => {
+    renderPanel()
+
+    expect(screen.queryByText('Developer/Admin')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Expand ChatBridge control plane' }))
+    expect(screen.getByText('Developer/Admin')).toBeTruthy()
   })
 })
