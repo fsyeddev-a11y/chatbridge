@@ -8,15 +8,14 @@
 ## Status
 
 - Implemented now:
-  - session-local internal control plane for registration, review, and allowlisting
+  - dedicated ChatBridge workspace in Settings for registration, review, allowlisting, and review history
+  - session page link-out to the canonical ChatBridge workspace
 - Not implemented yet:
-  - dedicated admin registry surface
-  - dedicated teacher class-management surface
   - role-backed navigation and access control in production UI
 
 ## Context
 
-The current control plane is session-local and useful for internal testing, but real users need dedicated teacher and admin surfaces. Platform review, teacher allowlisting, and app visibility should not depend on a single chat session page.
+The current runtime no longer needs a full governance control plane embedded inside a live tutoring session. Platform review, teacher allowlisting, and app visibility should live in dedicated settings/admin surfaces, while the session page should stay focused on the app shelf, active app panel, and conversation.
 
 ---
 
@@ -101,6 +100,41 @@ last change attribution
 #### Testing
 
 - Manual test confirms suspended apps are clearly marked and not enableable by teachers.
+
+---
+
+### US-12.4: Live sessions stay runtime-focused
+
+**As a** student or tutor,  
+**I want** the session page to focus on the conversation and active apps,  
+**so that** governance controls do not clutter the live teaching experience.
+
+#### Acceptance Criteria
+
+- The session page does not render the full registration/review/allowlist control plane inline.
+- The session page retains the ChatBridge app shelf and active app panel.
+- The session page provides a lightweight path to the canonical `Settings -> ChatBridge` workspace.
+- Governance controls are not duplicated across the session page and Settings.
+
+#### Testing
+
+- Manual test confirms the session page no longer shows the full control-plane card.
+- Manual test confirms operators can still reach `Settings -> ChatBridge` from the session page.
+- Manual test confirms the app shelf and active app panel continue to function.
+
+#### Spec
+
+**Session-page ChatBridge surfaces should be limited to:**
+
+```
+app shelf
+active app panel
+small link or hint to the canonical ChatBridge settings workspace
+```
+
+**Design rule:**
+- Session UX is runtime-first.
+- Governance UX is settings-first.
 
 ## Out of Scope
 
