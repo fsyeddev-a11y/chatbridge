@@ -8,7 +8,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc .node-version ./
 COPY release/app/package.json release/app/package.json
 COPY patches patches
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts --filter .
 
 COPY . .
 
