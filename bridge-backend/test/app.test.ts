@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { createApp, getConfiguredAllowedOrigins } from '../src/app.js'
-import type { ChatCompletionClient } from '../src/chat.js'
+import type { ChatCompletionClient, ChatCompletionStreamClient } from '../src/chat.js'
 import { createInMemoryFixedWindowRateLimiter } from '../src/rate-limit.js'
 import {
   createConfiguredBridgeStore,
@@ -481,6 +481,47 @@ describe('bridge-backend app', () => {
       content: 'Bridge-backed answer',
       model: 'gpt-4o-mini',
     })
+  })
+
+  it('streams chat completions through the backend-owned SSE route', async () => {
+    const fakeChatStreamClient: ChatCompletionStreamClient = async (_request, handlers) => {
+      handlers?.onStart?.({ model: 'gpt-4o-mini' })
+      handlers?.onTextDelta?.('Bridge-')
+      handlers?.onTextDelta?.('backed answer')
+      return {
+        content: 'Bridge-backed answer',
+        model: 'gpt-4o-mini',
+      }
+    }
+
+    const app = createApp({
+      store: createInMemoryBridgeStore(),
+      authVerifier: allowAllAuth,
+      chatClient: fakeChatClient,
+      chatStreamClient: fakeChatStreamClient,
+    })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chat/stream',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        messages: [
+          {
+            role: 'user',
+            content: 'Hello from TutorMeAI',
+          },
+        ],
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.match(response.headers['content-type'] || '', /text\/event-stream/)
+    assert.match(response.body, /event: started/)
+    assert.match(response.body, /event: delta/)
+    assert.match(response.body, /Bridge-backed answer/)
+    assert.match(response.body, /event: completed/)
   })
 
   it('prepends backend-owned ChatBridge policy context to chat generation', async () => {

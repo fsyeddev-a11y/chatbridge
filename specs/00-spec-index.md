@@ -26,7 +26,7 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [x] `09` Auth gate and backend route protection
 - [x] `10` Backend-owned non-streaming web chat
 - [x] `10` Backend-owned ChatBridge policy context and invocation audit events
-- [ ] `10` Streaming backend chat
+- [x] `10` Streaming backend chat
 - [x] `10` Backend-side tool orchestration for app-opening tools
 - [ ] `11` Supabase/Postgres-backed control-plane persistence
 - [x] `11` Backend-owned app/session reconciliation

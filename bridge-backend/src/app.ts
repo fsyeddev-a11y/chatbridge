@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import { ZodError } from 'zod'
 import { createSupabaseAuthVerifier, getBearerToken, type AuthVerifier } from './auth.js'
-import { createOpenAIChatClient, type ChatCompletionClient } from './chat.js'
+import {
+  createOpenAIChatClient,
+  createOpenAIChatStreamClient,
+  type ChatCompletionClient,
+  type ChatCompletionStreamClient,
+} from './chat.js'
 import { prependChatBridgeOrchestrationMessage } from './chatbridge-orchestration.js'
 import { ChatBridgeToolPolicyError, createChatBridgeToolDefinitions } from './chatbridge-tools.js'
 import {
@@ -34,6 +39,7 @@ export type AppOptions = {
   allowedOrigins?: string[]
   authVerifier?: AuthVerifier
   chatClient?: ChatCompletionClient
+  chatStreamClient?: ChatCompletionStreamClient
   chatRateLimiter?: RateLimiter | null
   chatRateLimiterSet?: ChatRateLimiterSet
   mutationRateLimiterSet?: MutationRateLimiterSet
@@ -61,6 +67,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   const allowedOrigins = new Set(options.allowedOrigins ?? getConfiguredAllowedOrigins())
   const authVerifier = options.authVerifier ?? createSupabaseAuthVerifier()
   const chatClient = options.chatClient ?? createOpenAIChatClient()
+  const chatStreamClient = options.chatStreamClient ?? createOpenAIChatStreamClient()
   const configuredRateLimiterSet = options.chatRateLimiterSet ?? createConfiguredChatRateLimiterSet()
   const chatRateLimiter = options.chatRateLimiter ?? configuredRateLimiterSet.perUser
   const chatRateLimiterSet = {
@@ -70,6 +77,41 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   }
   const mutationRateLimiterSet = options.mutationRateLimiterSet ?? createConfiguredMutationRateLimiterSet()
   const toolRateLimiterSet = options.toolRateLimiterSet ?? createConfiguredToolRateLimiterSet()
+
+  async function prepareChatInvocation(body: {
+    sessionId?: string
+    classId?: string
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
+  }, userId?: string) {
+    const bridgeState = body.sessionId && userId ? await store.getBridgeSessionState(body.sessionId, userId) : undefined
+    const effectiveClassId = body.classId || bridgeState?.activeClassId
+    const approvedApps = effectiveClassId ? await store.listApprovedAppsForClass(effectiveClassId) : []
+    const traceId = `model-${randomUUID()}`
+    const orchestratedMessages = prependChatBridgeOrchestrationMessage(body.messages, {
+      classId: effectiveClassId,
+      approvedApps,
+      bridgeState,
+    })
+    const toolDefinitions = await createChatBridgeToolDefinitions({
+      approvedApps,
+      store,
+      sessionId: body.sessionId,
+      userId,
+      classId: effectiveClassId,
+      bridgeState,
+      traceId,
+      toolRateLimiter: toolRateLimiterSet.perUserPerApp,
+    })
+
+    return {
+      bridgeState,
+      effectiveClassId,
+      approvedApps,
+      traceId,
+      orchestratedMessages,
+      toolDefinitions,
+    }
+  }
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin
@@ -369,6 +411,175 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     })
   })
 
+  app.post('/api/chat/stream', async (request, reply) => {
+    const userId = request.headers['x-chatbridge-user-id']
+    const body = BackendChatRequestSchema.parse(request.body)
+    const limited = await applyChatRateLimits({
+      request,
+      reply,
+      store,
+      rateLimiters: chatRateLimiterSet,
+      userId: typeof userId === 'string' ? userId : undefined,
+      sessionId: body.sessionId,
+    })
+
+    if (limited) {
+      return limited
+    }
+
+    const authenticatedUserId = typeof userId === 'string' ? userId : undefined
+    const { bridgeState, effectiveClassId, approvedApps, traceId, orchestratedMessages, toolDefinitions } =
+      await prepareChatInvocation(body, authenticatedUserId)
+    const abortController = new AbortController()
+    request.raw.on('close', () => {
+      abortController.abort()
+    })
+
+    await store.appendAuditEvent({
+      timestamp: Date.now(),
+      traceId,
+      eventType: 'ModelInvocationStarted',
+      source: 'bridge-backend',
+      sessionId: body.sessionId,
+      classId: effectiveClassId,
+      appId: bridgeState?.activeAppId,
+      summary: 'Backend-owned streaming model invocation started.',
+      metadata: {
+        model: process.env.CHATBRIDGE_OPENAI_MODEL || 'gpt-4o-mini',
+        messageCount: body.messages.length,
+        approvedAppCount: approvedApps.length,
+        transport: 'sse',
+      },
+    })
+
+    reply.hijack()
+    const existingHeaders = reply.getHeaders()
+    for (const [name, value] of Object.entries(existingHeaders)) {
+      if (value !== undefined) {
+        reply.raw.setHeader(name, value as string | number | readonly string[])
+      }
+    }
+    reply.raw.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+    reply.raw.setHeader('Cache-Control', 'no-cache, no-transform')
+    reply.raw.setHeader('Connection', 'keep-alive')
+    reply.raw.setHeader('X-Accel-Buffering', 'no')
+    reply.raw.writeHead(200)
+
+    const writeEvent = (event: string, data: Record<string, unknown>) => {
+      reply.raw.write(`event: ${event}\n`)
+      reply.raw.write(`data: ${JSON.stringify(data)}\n\n`)
+    }
+
+    try {
+      writeEvent('started', {
+        traceId,
+        model: process.env.CHATBRIDGE_OPENAI_MODEL || 'gpt-4o-mini',
+      })
+
+      const response = await chatStreamClient(
+        {
+          messages: orchestratedMessages,
+          tools: toolDefinitions,
+          signal: abortController.signal,
+        },
+        {
+          onTextDelta: (delta) => {
+            writeEvent('delta', { delta })
+          },
+          onToolResult: (toolResult) => {
+            writeEvent('tool_result', { toolResult })
+          },
+        }
+      )
+
+      const updatedBridgeState =
+        body.sessionId && authenticatedUserId ? await store.getBridgeSessionState(body.sessionId, authenticatedUserId) : undefined
+
+      await store.appendAuditEvent({
+        timestamp: Date.now(),
+        traceId,
+        eventType: 'ModelInvocationCompleted',
+        source: 'bridge-backend',
+        sessionId: body.sessionId,
+        classId: effectiveClassId,
+        appId: updatedBridgeState?.activeAppId || bridgeState?.activeAppId,
+        summary: 'Backend-owned streaming model invocation completed.',
+        metadata: {
+          model: response.model,
+          approvedAppCount: approvedApps.length,
+          activeAppId: updatedBridgeState?.activeAppId || bridgeState?.activeAppId,
+          resultCategory: 'success',
+          transport: 'sse',
+        },
+      })
+
+      writeEvent('completed', {
+        content: response.content,
+        model: response.model,
+        bridgeState: updatedBridgeState,
+        traceId,
+      })
+      reply.raw.end()
+    } catch (error) {
+      if (abortController.signal.aborted) {
+        reply.raw.end()
+        return reply
+      }
+
+      if (error instanceof ChatBridgeToolPolicyError) {
+        await store.appendAuditEvent({
+          timestamp: Date.now(),
+          traceId,
+          eventType: 'ModelInvocationFailed',
+          source: 'bridge-backend',
+          sessionId: body.sessionId,
+          classId: effectiveClassId,
+          appId: bridgeState?.activeAppId,
+          summary: 'Backend-owned streaming model invocation failed due to ChatBridge tool policy.',
+          metadata: {
+            resultCategory: error.errorCode,
+            transport: 'sse',
+            ...(error.metadata || {}),
+          },
+        })
+
+        writeEvent('error', {
+          error: error.errorCode,
+          traceId,
+          ...(error.metadata || {}),
+        })
+        reply.raw.end()
+        return reply
+      }
+
+      await store.appendAuditEvent({
+        timestamp: Date.now(),
+        traceId,
+        eventType: 'ModelInvocationFailed',
+        source: 'bridge-backend',
+        sessionId: body.sessionId,
+        classId: effectiveClassId,
+        appId: bridgeState?.activeAppId,
+        summary: 'Backend-owned streaming model invocation failed.',
+        metadata: {
+          approvedAppCount: approvedApps.length,
+          activeAppId: bridgeState?.activeAppId,
+          resultCategory: 'provider_error',
+          transport: 'sse',
+          errorMessage: error instanceof Error ? error.message.slice(0, 500) : 'Unknown provider failure',
+        },
+      })
+
+      writeEvent('error', {
+        error: 'provider_unavailable',
+        traceId,
+      })
+      reply.raw.end()
+    }
+
+    return reply
+  })
+
   app.post('/api/chat/generate', async (request, reply) => {
     const userId = request.headers['x-chatbridge-user-id']
     const body = BackendChatRequestSchema.parse(request.body)
@@ -386,28 +597,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
 
     const authenticatedUserId = typeof userId === 'string' ? userId : undefined
-    const bridgeState =
-      body.sessionId && authenticatedUserId
-        ? await store.getBridgeSessionState(body.sessionId, authenticatedUserId)
-        : undefined
-    const effectiveClassId = body.classId || bridgeState?.activeClassId
-    const approvedApps = effectiveClassId ? await store.listApprovedAppsForClass(effectiveClassId) : []
-    const traceId = `model-${randomUUID()}`
-    const orchestratedMessages = prependChatBridgeOrchestrationMessage(body.messages, {
-      classId: effectiveClassId,
-      approvedApps,
-      bridgeState,
-    })
-    const toolDefinitions = await createChatBridgeToolDefinitions({
-      approvedApps,
-      store,
-      sessionId: body.sessionId,
-      userId: authenticatedUserId,
-      classId: effectiveClassId,
-      bridgeState,
-      traceId,
-      toolRateLimiter: toolRateLimiterSet.perUserPerApp,
-    })
+    const { bridgeState, effectiveClassId, approvedApps, traceId, orchestratedMessages, toolDefinitions } =
+      await prepareChatInvocation(body, authenticatedUserId)
 
     await store.appendAuditEvent({
       timestamp: Date.now(),

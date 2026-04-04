@@ -17,7 +17,7 @@ import { cloneMessage, getMessageText, mergeMessages } from '@shared/utils/messa
 import { identity, pickBy } from 'lodash'
 import { createModelDependencies } from '@/adapters'
 import * as appleAppStore from '@/packages/apple_app_store'
-import { generateBackendChat } from '@/packages/backend-chat'
+import { generateBackendChat, streamBackendChat } from '@/packages/backend-chat'
 import { getSessionBridgeState } from '@/packages/chatbridge/session'
 import { buildContextForAI } from '@/packages/context-management'
 import {
@@ -225,10 +225,64 @@ export async function generate(
             status: [],
           }
           await modifyMessage(sessionId, targetMsg, false, true)
-          const backendResult = await generateBackendChat(promptMsgs, {
+          const backendRequestOptions = {
             sessionId,
             classId: bridgeState.activeClassId,
-          })
+          }
+
+          let backendResult
+          if (settings.stream !== false) {
+            const abortController = new AbortController()
+            targetMsg = {
+              ...targetMsg,
+              cancel: () => abortController.abort(),
+              contentParts: [{ type: 'text', text: '' }],
+            }
+            await modifyMessage(sessionId, targetMsg, false, true)
+
+            backendResult = await streamBackendChat(
+              promptMsgs,
+              {
+                onStarted: ({ model }) => {
+                  targetMsg = {
+                    ...targetMsg,
+                    model,
+                    status: [],
+                  }
+                  void modifyMessage(sessionId, targetMsg, false, true)
+                },
+                onDelta: (delta) => {
+                  const currentText = getMessageText(targetMsg, true, true)
+                  const nextText = `${currentText}${delta}`
+                  if (!firstTokenLatency && nextText.length > 0) {
+                    firstTokenLatency = Date.now() - startTime
+                  }
+                  targetMsg = {
+                    ...targetMsg,
+                    contentParts: [{ type: 'text', text: nextText }],
+                    firstTokenLatency,
+                    status: [],
+                  }
+                  void modifyMessage(sessionId, targetMsg, false, true)
+                },
+                onCompleted: ({ bridgeState: completedBridgeState }) => {
+                  if (completedBridgeState) {
+                    void chatStore.updateSessionWithMessages(sessionId, (currentSession) => ({
+                      ...currentSession,
+                      bridgeState: completedBridgeState,
+                    }))
+                  }
+                },
+              },
+              {
+                ...backendRequestOptions,
+                signal: abortController.signal,
+              }
+            )
+          } else {
+            backendResult = await generateBackendChat(promptMsgs, backendRequestOptions)
+          }
+
           if (backendResult.bridgeState) {
             await chatStore.updateSessionWithMessages(sessionId, (currentSession) => ({
               ...currentSession,

@@ -9,12 +9,14 @@
 
 - Implemented now:
   - authenticated backend-owned non-streaming chat generation for deployed web
+  - authenticated backend-owned streaming chat generation for deployed web
   - backend-held OpenAI key for core chat
+  - frontend progressive assistant updates from backend SSE deltas
+  - backend-side ChatBridge tool orchestration for approved app-opening tools
   - no browser-side provider setup required for core web chat
 - Not implemented yet:
-  - streaming responses
-  - backend-side ChatBridge tool orchestration
   - backend generation event emission parity with frontend tracing
+  - richer streamed tool lifecycle events beyond basic tool-result notifications
 
 ## Context
 
