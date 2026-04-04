@@ -1,7 +1,15 @@
 import type { BridgeAppContext, Session, SessionBridgeState } from '@shared/types'
+import { getSupabaseAuthHeaders } from '@/packages/supabase'
 import * as chatStore from '@/stores/chatStore'
 
 export const DEFAULT_CHATBRIDGE_CLASS_ID = 'demo-class'
+const CHATBRIDGE_API_ORIGIN = process.env.CHATBRIDGE_API_ORIGIN || 'http://localhost:8787'
+
+type BridgeSessionApiResponse = {
+  sessionId: string
+  bridgeState?: SessionBridgeState
+  updatedAt?: number
+}
 
 export function getSessionBridgeState(session: Session): SessionBridgeState {
   return {
@@ -11,8 +19,87 @@ export function getSessionBridgeState(session: Session): SessionBridgeState {
   }
 }
 
+async function fetchBridgeSessionStateFromBackend(sessionId: string) {
+  const authHeaders = await getSupabaseAuthHeaders()
+  const response = await fetch(`${CHATBRIDGE_API_ORIGIN}/api/sessions/${sessionId}/bridge-state`, {
+    headers: {
+      ...authHeaders,
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`ChatBridge session request failed: ${response.status}`)
+  }
+
+  return (await response.json()) as BridgeSessionApiResponse
+}
+
+async function persistBridgeSessionStateToBackend(sessionId: string, bridgeState: SessionBridgeState) {
+  const authHeaders = await getSupabaseAuthHeaders()
+  const response = await fetch(`${CHATBRIDGE_API_ORIGIN}/api/sessions/${sessionId}/bridge-state`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders,
+    },
+    body: JSON.stringify({
+      bridgeState,
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`ChatBridge session persistence failed: ${response.status}`)
+  }
+
+  return (await response.json()) as BridgeSessionApiResponse
+}
+
+async function syncBridgeStateToBackend(sessionId: string, bridgeState: SessionBridgeState) {
+  try {
+    await persistBridgeSessionStateToBackend(sessionId, bridgeState)
+  } catch (error) {
+    console.warn('Failed to persist ChatBridge session state', error)
+  }
+}
+
+export async function hydrateBridgeStateFromBackend(sessionId: string) {
+  const session = await chatStore.getSession(sessionId)
+  if (!session) {
+    return undefined
+  }
+
+  try {
+    const response = await fetchBridgeSessionStateFromBackend(sessionId)
+    const backendBridgeState = response.bridgeState
+    if (!backendBridgeState) {
+      return undefined
+    }
+
+    const normalized = {
+      ...backendBridgeState,
+      activeClassId: backendBridgeState.activeClassId || DEFAULT_CHATBRIDGE_CLASS_ID,
+      appContext: backendBridgeState.appContext || {},
+    }
+
+    const current = getSessionBridgeState(session)
+    if (JSON.stringify(current) === JSON.stringify(normalized)) {
+      return normalized
+    }
+
+    await chatStore.updateSessionWithMessages(sessionId, (currentSession) => ({
+      ...currentSession,
+      bridgeState: normalized,
+    }))
+
+    return normalized
+  } catch (error) {
+    console.warn('Failed to hydrate ChatBridge session state', error)
+    return undefined
+  }
+}
+
 export async function activateBridgeApp(sessionId: string, appId: string) {
-  return await chatStore.updateSessionWithMessages(sessionId, (session) => {
+  const nextSession = await chatStore.updateSessionWithMessages(sessionId, (session) => {
     const bridgeState = getSessionBridgeState(session)
     const existing = bridgeState.appContext[appId]
     return {
@@ -34,10 +121,13 @@ export async function activateBridgeApp(sessionId: string, appId: string) {
       },
     }
   })
+
+  await syncBridgeStateToBackend(sessionId, getSessionBridgeState(nextSession))
+  return nextSession
 }
 
 export async function closeBridgeApp(sessionId: string) {
-  return await chatStore.updateSessionWithMessages(sessionId, (session) => {
+  const nextSession = await chatStore.updateSessionWithMessages(sessionId, (session) => {
     const bridgeState = getSessionBridgeState(session)
     return {
       ...session,
@@ -47,10 +137,13 @@ export async function closeBridgeApp(sessionId: string) {
       },
     }
   })
+
+  await syncBridgeStateToBackend(sessionId, getSessionBridgeState(nextSession))
+  return nextSession
 }
 
 export async function updateBridgeAppContext(sessionId: string, appId: string, nextState: Partial<BridgeAppContext>) {
-  return await chatStore.updateSessionWithMessages(sessionId, (session) => {
+  const nextSession = await chatStore.updateSessionWithMessages(sessionId, (session) => {
     const bridgeState = getSessionBridgeState(session)
     const previous = bridgeState.appContext[appId]
     return {
@@ -71,4 +164,7 @@ export async function updateBridgeAppContext(sessionId: string, appId: string, n
       },
     }
   })
+
+  await syncBridgeStateToBackend(sessionId, getSessionBridgeState(nextSession))
+  return nextSession
 }

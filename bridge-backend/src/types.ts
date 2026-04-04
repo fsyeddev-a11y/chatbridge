@@ -62,3 +62,27 @@ export type AuditEvent = {
   summary?: string
   metadata?: Record<string, unknown>
 }
+
+export type BridgeAppRuntimeStatus = 'idle' | 'ready' | 'active' | 'error' | 'complete'
+
+export type BridgeAppContext = {
+  appId: string
+  status: BridgeAppRuntimeStatus
+  summary?: string
+  lastEventAt?: number
+  lastState?: Record<string, unknown>
+  lastError?: string
+}
+
+export type SessionBridgeState = {
+  activeAppId?: string
+  activeClassId: string
+  appContext: Record<string, BridgeAppContext>
+}
+
+export type BridgeSessionRecord = {
+  sessionId: string
+  userId: string
+  bridgeState: SessionBridgeState
+  updatedAt: number
+}

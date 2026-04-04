@@ -70,6 +70,24 @@ export function normalizeWeatherResponse(locationName, forecast) {
   }
 }
 
+export function isRecoverableWeatherState(state) {
+  return Boolean(
+    state &&
+      typeof state === 'object' &&
+      typeof state.location === 'string' &&
+      typeof state.conditions === 'string' &&
+      typeof state.temperatureF === 'number'
+  )
+}
+
+export function buildRecoveredWeatherSummary(state) {
+  if (!isRecoverableWeatherState(state)) {
+    return null
+  }
+
+  return `Restored last weather lookup for ${state.location}.`
+}
+
 export async function lookupWeather(locationQuery) {
   const geocodingResponse = await fetch(buildGeocodingUrl(locationQuery))
   if (!geocodingResponse.ok) {

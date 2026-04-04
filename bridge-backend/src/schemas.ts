@@ -69,3 +69,28 @@ export const BackendChatMessageSchema = z.object({
 export const BackendChatRequestSchema = z.object({
   messages: z.array(BackendChatMessageSchema).min(1),
 })
+
+export const BridgeAppRuntimeStatusSchema = z.enum(['idle', 'ready', 'active', 'error', 'complete'])
+
+export const BridgeAppContextSchema = z.object({
+  appId: z.string().min(1),
+  status: BridgeAppRuntimeStatusSchema.default('idle'),
+  summary: z.string().optional(),
+  lastEventAt: z.number().optional(),
+  lastState: z.record(z.string(), z.unknown()).optional(),
+  lastError: z.string().optional(),
+})
+
+export const SessionBridgeStateSchema = z.object({
+  activeAppId: z.string().optional(),
+  activeClassId: z.string().default('demo-class'),
+  appContext: z.record(z.string(), BridgeAppContextSchema).default({}),
+})
+
+export const SessionIdParamsSchema = z.object({
+  sessionId: z.string().min(1),
+})
+
+export const BridgeSessionUpsertBodySchema = z.object({
+  bridgeState: SessionBridgeStateSchema,
+})

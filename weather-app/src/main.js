@@ -1,5 +1,5 @@
 import { createBridge } from './bridge.js'
-import { lookupWeather } from './weather.js'
+import { buildRecoveredWeatherSummary, isRecoverableWeatherState, lookupWeather } from './weather.js'
 
 const appId = 'weather'
 
@@ -43,6 +43,15 @@ const bridge = createBridge({
   appId,
   onInit(payload) {
     bridgeStatus.textContent = `INIT received for ${payload?.classId || 'unknown class'}`
+    if (isRecoverableWeatherState(payload?.previousState)) {
+      latestState = payload.previousState
+      locationInput.value = payload.previousState.location
+      renderForecast(payload.previousState)
+      setBanner(buildRecoveredWeatherSummary(payload.previousState))
+      bridge.sendReady(`Weather Dashboard restored ${payload.previousState.location}.`)
+      return
+    }
+
     bridge.sendReady('Weather Dashboard is ready to look up locations.')
   },
   onPing() {

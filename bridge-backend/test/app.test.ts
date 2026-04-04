@@ -5,10 +5,13 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { createApp, getConfiguredAllowedOrigins } from '../src/app.js'
 import type { ChatCompletionClient } from '../src/chat.js'
+import { createInMemoryFixedWindowRateLimiter } from '../src/rate-limit.js'
 import {
+  createConfiguredBridgeStore,
   createFileBackedBridgeStore,
   createInMemoryBridgeStore,
   getAllowedOriginsForLaunchUrl,
+  getConfiguredStoreDriver,
   getConfiguredWeatherAppUrl,
 } from '../src/store.js'
 
@@ -124,7 +127,7 @@ describe('bridge-backend app', () => {
 
     assert.equal(response.statusCode, 204)
     assert.equal(response.headers['access-control-allow-origin'], 'http://localhost:3000')
-    assert.equal(response.headers['access-control-allow-methods'], 'GET,POST,OPTIONS')
+    assert.equal(response.headers['access-control-allow-methods'], 'GET,POST,PUT,OPTIONS')
     assert.equal(response.headers['access-control-allow-headers'], 'Content-Type,Authorization')
   })
 
@@ -147,11 +150,11 @@ describe('bridge-backend app', () => {
     const store = createFileBackedBridgeStore(storePath)
 
     assert.deepEqual(
-      store.listApprovedAppsForClass('demo-class').map((entry) => entry.manifest.appId).sort(),
+      (await store.listApprovedAppsForClass('demo-class')).map((entry) => entry.manifest.appId).sort(),
       ['chess', 'google-classroom', 'weather']
     )
 
-    store.appendAuditEvent({
+    await store.appendAuditEvent({
       timestamp: Date.now(),
       traceId: 'trace-persisted',
       eventType: 'AppReadyReceived',
@@ -210,7 +213,7 @@ describe('bridge-backend app', () => {
     )
 
     const store = createFileBackedBridgeStore(storePath)
-    const weather = store.getRegistryEntry('weather')
+    const weather = await store.getRegistryEntry('weather')
 
     assert.equal(weather?.manifest.launchUrl, 'http://localhost:4173')
     assert.deepEqual(weather?.manifest.allowedOrigins, ['http://localhost:4173'])
@@ -248,6 +251,32 @@ describe('bridge-backend app', () => {
     assert.equal(response.statusCode, 201)
     assert.equal(response.json().app.reviewState, 'pending')
     assert.equal(response.json().app.manifest.appId, 'story-builder')
+  })
+
+  it('selects the configured store driver safely', () => {
+    assert.equal(getConfiguredStoreDriver(), 'file')
+    assert.equal(getConfiguredStoreDriver('supabase'), 'supabase')
+    assert.equal(getConfiguredStoreDriver('invalid'), 'file')
+  })
+
+  it('creates a file-backed store by default from configuration', async () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), 'chatbridge-configured-store-'))
+    const storePath = path.join(tempDir, 'bridge-store.json')
+    const originalDriver = process.env.CHATBRIDGE_STORE_DRIVER
+
+    process.env.CHATBRIDGE_STORE_DRIVER = 'file'
+
+    try {
+      const store = createConfiguredBridgeStore(storePath)
+      const apps = await store.listRegistryEntries()
+      assert.ok(apps.length > 0)
+    } finally {
+      if (originalDriver === undefined) {
+        delete process.env.CHATBRIDGE_STORE_DRIVER
+      } else {
+        process.env.CHATBRIDGE_STORE_DRIVER = originalDriver
+      }
+    }
   })
 
   it('updates review state and exposes review actions', async () => {
@@ -407,5 +436,88 @@ describe('bridge-backend app', () => {
       content: 'Bridge-backed answer',
       model: 'gpt-4o-mini',
     })
+  })
+
+  it('rate-limits backend chat generation when configured', async () => {
+    const app = createApp({
+      store: createInMemoryBridgeStore(),
+      authVerifier: allowAllAuth,
+      chatClient: fakeChatClient,
+      chatRateLimiter: createInMemoryFixedWindowRateLimiter(1, 60_000),
+    })
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+    })
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        messages: [{ role: 'user', content: 'again' }],
+      },
+    })
+
+    assert.equal(first.statusCode, 200)
+    assert.equal(second.statusCode, 429)
+    assert.equal(second.json().error, 'rate_limited')
+  })
+
+  it('persists and reloads bridge session state through the backend session API', async () => {
+    const app = createApp({
+      store: createInMemoryBridgeStore(),
+      authVerifier: allowAllAuth,
+      chatClient: fakeChatClient,
+    })
+
+    const saveResponse = await app.inject({
+      method: 'PUT',
+      url: '/api/sessions/session-1/bridge-state',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        bridgeState: {
+          activeClassId: 'demo-class',
+          activeAppId: 'weather',
+          appContext: {
+            weather: {
+              appId: 'weather',
+              status: 'ready',
+              summary: 'Chicago is 72F and sunny.',
+              lastState: {
+                location: 'Chicago',
+                temperatureF: 72,
+              },
+            },
+          },
+        },
+      },
+    })
+
+    assert.equal(saveResponse.statusCode, 200)
+    assert.equal(saveResponse.json().bridgeState.activeAppId, 'weather')
+
+    const loadResponse = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/session-1/bridge-state',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(loadResponse.statusCode, 200)
+    assert.equal(loadResponse.json().bridgeState.activeAppId, 'weather')
+    assert.equal(loadResponse.json().bridgeState.appContext.weather.summary, 'Chicago is 72F and sunny.')
   })
 })

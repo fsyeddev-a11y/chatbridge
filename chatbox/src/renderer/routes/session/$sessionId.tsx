@@ -13,6 +13,7 @@ import ChatBridgeControlPanel from '@/components/session/ChatBridgeControlPanel'
 import ChatBridgePanel from '@/components/session/ChatBridgePanel'
 import ChatBridgeShelf from '@/components/session/ChatBridgeShelf'
 import ThreadHistoryDrawer from '@/components/session/ThreadHistoryDrawer'
+import { hydrateBridgeStateFromBackend } from '@/packages/chatbridge/session'
 import { updateSession as updateSessionStore, useSession } from '@/stores/chatStore'
 import { lastUsedModelStore } from '@/stores/lastUsedModelStore'
 import * as scrollActions from '@/stores/scrollActions'
@@ -50,6 +51,14 @@ function RouteComponent() {
       scrollActions.scrollToBottom('auto') // 每次启动时自动滚动到底部
     }, 200)
   }, [])
+
+  useEffect(() => {
+    if (!currentSession) {
+      return
+    }
+
+    void hydrateBridgeStateFromBackend(currentSession.id)
+  }, [currentSession?.id])
 
   // currentSession变化时（包括session settings变化），存下当前的settings作为新Session的默认值
   useEffect(() => {

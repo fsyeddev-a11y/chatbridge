@@ -1,24 +1,37 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import type { AppManifest, AppRegistryEntry, AuditEvent, ClassAppAllowlist, ReviewAction } from './types.js'
+import type {
+  AppManifest,
+  AppRegistryEntry,
+  AuditEvent,
+  BridgeSessionRecord,
+  ClassAppAllowlist,
+  ReviewAction,
+  SessionBridgeState,
+} from './types.js'
+import { createSupabaseBridgeStore } from './supabase-store.js'
+
+type Awaitable<T> = T | Promise<T>
 
 export type BridgeStore = {
-  listRegistryEntries(): AppRegistryEntry[]
-  getRegistryEntry(appId: string): AppRegistryEntry | undefined
-  listApprovedAppsForClass(classId: string): AppRegistryEntry[]
-  listClassAllowlist(classId: string): ClassAppAllowlist[]
-  registerApp(manifest: AppManifest): AppRegistryEntry
+  listRegistryEntries(): Awaitable<AppRegistryEntry[]>
+  getRegistryEntry(appId: string): Awaitable<AppRegistryEntry | undefined>
+  listApprovedAppsForClass(classId: string): Awaitable<AppRegistryEntry[]>
+  listClassAllowlist(classId: string): Awaitable<ClassAppAllowlist[]>
+  registerApp(manifest: AppManifest): Awaitable<AppRegistryEntry>
   updateReviewState(
     appId: string,
     reviewState: AppRegistryEntry['reviewState'],
     reviewerId: string,
     reviewNotes?: string
-  ): AppRegistryEntry | undefined
-  enableAppForClass(classId: string, appId: string, enabledBy: string): ClassAppAllowlist | undefined
-  disableAppForClass(classId: string, appId: string, enabledBy: string): ClassAppAllowlist | undefined
-  appendAuditEvent(event: AuditEvent): AuditEvent
-  listAuditEvents(): AuditEvent[]
-  listReviewActions(): ReviewAction[]
+  ): Awaitable<AppRegistryEntry | undefined>
+  enableAppForClass(classId: string, appId: string, enabledBy: string): Awaitable<ClassAppAllowlist | undefined>
+  disableAppForClass(classId: string, appId: string, enabledBy: string): Awaitable<ClassAppAllowlist | undefined>
+  appendAuditEvent(event: AuditEvent): Awaitable<AuditEvent>
+  listAuditEvents(): Awaitable<AuditEvent[]>
+  listReviewActions(): Awaitable<ReviewAction[]>
+  getBridgeSessionState(sessionId: string, userId: string): Awaitable<SessionBridgeState | undefined>
+  upsertBridgeSessionState(sessionId: string, userId: string, bridgeState: SessionBridgeState): Awaitable<BridgeSessionRecord>
 }
 
 export type BridgeStoreData = {
@@ -26,7 +39,10 @@ export type BridgeStoreData = {
   classAllowlist: ClassAppAllowlist[]
   auditEvents: AuditEvent[]
   reviewActions: ReviewAction[]
+  bridgeSessions: BridgeSessionRecord[]
 }
+
+export type BridgeStoreDriver = 'file' | 'supabase'
 
 const DEFAULT_WEATHER_APP_URL = 'http://localhost:4173'
 
@@ -144,17 +160,19 @@ function createSeedData(): BridgeStoreData {
 
   const auditEvents: AuditEvent[] = []
   const reviewActions: ReviewAction[] = []
+  const bridgeSessions: BridgeSessionRecord[] = []
 
   return {
     registryEntries,
     classAllowlist,
     auditEvents,
     reviewActions,
+    bridgeSessions,
   }
 }
 
 function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: BridgeStoreData) => void): BridgeStore {
-  const { registryEntries, classAllowlist, auditEvents, reviewActions } = data
+  const { registryEntries, classAllowlist, auditEvents, reviewActions, bridgeSessions } = data
 
   function persist() {
     onWrite?.({
@@ -162,6 +180,7 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
       classAllowlist,
       auditEvents,
       reviewActions,
+      bridgeSessions,
     })
   }
 
@@ -269,11 +288,38 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
     listReviewActions() {
       return reviewActions
     },
+    getBridgeSessionState(sessionId, userId) {
+      return bridgeSessions.find((entry) => entry.sessionId === sessionId && entry.userId === userId)?.bridgeState
+    },
+    upsertBridgeSessionState(sessionId, userId, bridgeState) {
+      const now = Date.now()
+      const existing = bridgeSessions.find((entry) => entry.sessionId === sessionId && entry.userId === userId)
+      if (existing) {
+        existing.bridgeState = bridgeState
+        existing.updatedAt = now
+        persist()
+        return existing
+      }
+
+      const nextRecord: BridgeSessionRecord = {
+        sessionId,
+        userId,
+        bridgeState,
+        updatedAt: now,
+      }
+      bridgeSessions.push(nextRecord)
+      persist()
+      return nextRecord
+    },
   }
 }
 
 export function createInMemoryBridgeStore(): BridgeStore {
   return createBridgeStoreFromData(createSeedData())
+}
+
+export function getConfiguredStoreDriver(envValue = process.env.CHATBRIDGE_STORE_DRIVER): BridgeStoreDriver {
+  return envValue === 'supabase' ? 'supabase' : 'file'
 }
 
 export function getDefaultStoreFilePath() {
@@ -293,6 +339,16 @@ export function createFileBackedBridgeStore(filePath = getDefaultStoreFilePath()
   })
 }
 
+export function createConfiguredBridgeStore(filePath = process.env.CHATBRIDGE_STORE_PATH || getDefaultStoreFilePath()): BridgeStore {
+  const driver = getConfiguredStoreDriver()
+
+  if (driver === 'supabase') {
+    return createSupabaseBridgeStore()
+  }
+
+  return createFileBackedBridgeStore(filePath)
+}
+
 function readStoreFile(filePath: string): BridgeStoreData {
   const raw = readFileSync(filePath, 'utf8')
   const parsed = JSON.parse(raw) as Partial<BridgeStoreData>
@@ -302,6 +358,7 @@ function readStoreFile(filePath: string): BridgeStoreData {
     classAllowlist: parsed.classAllowlist || [],
     auditEvents: parsed.auditEvents || [],
     reviewActions: parsed.reviewActions || [],
+    bridgeSessions: parsed.bridgeSessions || [],
   })
 }
 

@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { buildForecastUrl, buildGeocodingUrl, normalizeWeatherResponse } from '../src/weather.js'
+import {
+  buildForecastUrl,
+  buildGeocodingUrl,
+  buildRecoveredWeatherSummary,
+  isRecoverableWeatherState,
+  normalizeWeatherResponse,
+} from '../src/weather.js'
 
 describe('weather-app weather helpers', () => {
   it('builds the expected Open-Meteo geocoding and forecast URLs', () => {
@@ -40,5 +46,32 @@ describe('weather-app weather helpers', () => {
       lowF: 58,
       windMph: 10,
     })
+  })
+
+  it('recognizes recoverable persisted weather state', () => {
+    assert.equal(
+      isRecoverableWeatherState({
+        location: 'Austin, Texas, United States',
+        temperatureF: 81,
+        conditions: 'Clear sky',
+      }),
+      true
+    )
+
+    assert.equal(
+      isRecoverableWeatherState({
+        location: 'Austin',
+      }),
+      false
+    )
+
+    assert.equal(
+      buildRecoveredWeatherSummary({
+        location: 'Austin, Texas, United States',
+        temperatureF: 81,
+        conditions: 'Clear sky',
+      }),
+      'Restored last weather lookup for Austin, Texas, United States.'
+    )
   })
 })

@@ -2,15 +2,18 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import { ZodError } from 'zod'
 import { createSupabaseAuthVerifier, getBearerToken, type AuthVerifier } from './auth.js'
 import { createOpenAIChatClient, type ChatCompletionClient } from './chat.js'
+import { createConfiguredChatRateLimiter, type RateLimiter } from './rate-limit.js'
 import {
   AppIdParamsSchema,
   AppManifestSchema,
   AuditEventSchema,
   BackendChatRequestSchema,
+  BridgeSessionUpsertBodySchema,
   ClassAllowlistBodySchema,
   ClassAllowlistToggleBodySchema,
   ClassIdParamsSchema,
   ReviewActionBodySchema,
+  SessionIdParamsSchema,
 } from './schemas.js'
 import { createInMemoryBridgeStore, type BridgeStore } from './store.js'
 
@@ -19,6 +22,7 @@ export type AppOptions = {
   allowedOrigins?: string[]
   authVerifier?: AuthVerifier
   chatClient?: ChatCompletionClient
+  chatRateLimiter?: RateLimiter | null
 }
 
 const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://localhost:4173']
@@ -42,13 +46,14 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   const allowedOrigins = new Set(options.allowedOrigins ?? getConfiguredAllowedOrigins())
   const authVerifier = options.authVerifier ?? createSupabaseAuthVerifier()
   const chatClient = options.chatClient ?? createOpenAIChatClient()
+  const chatRateLimiter = options.chatRateLimiter ?? createConfiguredChatRateLimiter()
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin
     if (origin && allowedOrigins.has(origin)) {
       reply.header('Access-Control-Allow-Origin', origin)
       reply.header('Vary', 'Origin')
-      reply.header('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+      reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS')
       reply.header('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     }
 
@@ -99,13 +104,13 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
 
   app.get('/api/registry/apps', async () => {
     return {
-      apps: store.listRegistryEntries(),
+      apps: await store.listRegistryEntries(),
     }
   })
 
   app.get('/api/registry/apps/:appId', async (request, reply) => {
     const { appId } = AppIdParamsSchema.parse(request.params)
-    const appEntry = store.getRegistryEntry(appId)
+    const appEntry = await store.getRegistryEntry(appId)
     if (!appEntry) {
       return reply.status(404).send({
         error: 'app_not_found',
@@ -119,7 +124,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
 
   app.post('/api/registry/apps', async (request, reply) => {
     const manifest = AppManifestSchema.parse(request.body)
-    const appEntry = store.registerApp(manifest)
+    const appEntry = await store.registerApp(manifest)
     return reply.status(201).send({
       app: appEntry,
     })
@@ -128,7 +133,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   app.post('/api/registry/apps/:appId/review', async (request, reply) => {
     const { appId } = AppIdParamsSchema.parse(request.params)
     const { reviewState, reviewerId, reviewNotes } = ReviewActionBodySchema.parse(request.body)
-    const updated = store.updateReviewState(appId, reviewState, reviewerId, reviewNotes)
+    const updated = await store.updateReviewState(appId, reviewState, reviewerId, reviewNotes)
     if (!updated) {
       return reply.status(404).send({
         error: 'app_not_found',
@@ -144,7 +149,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     const { classId } = ClassIdParamsSchema.parse(request.params)
     return {
       classId,
-      apps: store.listApprovedAppsForClass(classId),
+      apps: await store.listApprovedAppsForClass(classId),
     }
   })
 
@@ -152,14 +157,14 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     const { classId } = ClassIdParamsSchema.parse(request.params)
     return {
       classId,
-      allowlist: store.listClassAllowlist(classId),
+      allowlist: await store.listClassAllowlist(classId),
     }
   })
 
   app.post('/api/classes/:classId/allowlist', async (request, reply) => {
     const { classId } = ClassIdParamsSchema.parse(request.params)
     const { appId, enabledBy } = ClassAllowlistBodySchema.parse(request.body)
-    const allowlistEntry = store.enableAppForClass(classId, appId, enabledBy)
+    const allowlistEntry = await store.enableAppForClass(classId, appId, enabledBy)
     if (!allowlistEntry) {
       return reply.status(404).send({
         error: 'approved_app_not_found',
@@ -176,7 +181,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     const { classId } = ClassIdParamsSchema.parse(request.params)
     const { appId } = AppIdParamsSchema.parse(request.params)
     const { enabledBy } = ClassAllowlistToggleBodySchema.parse(request.body)
-    const allowlistEntry = store.disableAppForClass(classId, appId, enabledBy)
+    const allowlistEntry = await store.disableAppForClass(classId, appId, enabledBy)
     if (!allowlistEntry) {
       return reply.status(404).send({
         error: 'allowlist_entry_not_found',
@@ -191,7 +196,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
 
   app.post('/api/audit/events', async (request, reply) => {
     const event = AuditEventSchema.parse(request.body)
-    const storedEvent = store.appendAuditEvent(event)
+    const storedEvent = await store.appendAuditEvent(event)
     return reply.status(202).send({
       accepted: true,
       event: storedEvent,
@@ -200,17 +205,67 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
 
   app.get('/api/audit/events', async () => {
     return {
-      events: store.listAuditEvents(),
+      events: await store.listAuditEvents(),
     }
   })
 
   app.get('/api/review-actions', async () => {
     return {
-      actions: store.listReviewActions(),
+      actions: await store.listReviewActions(),
     }
   })
 
+  app.get('/api/sessions/:sessionId/bridge-state', async (request, reply) => {
+    const { sessionId } = SessionIdParamsSchema.parse(request.params)
+    const userId = request.headers['x-chatbridge-user-id']
+
+    if (typeof userId !== 'string') {
+      return reply.status(401).send({
+        error: 'unauthorized',
+      })
+    }
+
+    const bridgeState = await store.getBridgeSessionState(sessionId, userId)
+    return {
+      sessionId,
+      bridgeState,
+    }
+  })
+
+  app.put('/api/sessions/:sessionId/bridge-state', async (request, reply) => {
+    const { sessionId } = SessionIdParamsSchema.parse(request.params)
+    const { bridgeState } = BridgeSessionUpsertBodySchema.parse(request.body)
+    const userId = request.headers['x-chatbridge-user-id']
+
+    if (typeof userId !== 'string') {
+      return reply.status(401).send({
+        error: 'unauthorized',
+      })
+    }
+
+    const record = await store.upsertBridgeSessionState(sessionId, userId, bridgeState)
+    return reply.status(200).send({
+      sessionId,
+      bridgeState: record.bridgeState,
+      updatedAt: record.updatedAt,
+    })
+  })
+
   app.post('/api/chat/generate', async (request, reply) => {
+    const userId = request.headers['x-chatbridge-user-id']
+    if (chatRateLimiter && typeof userId === 'string') {
+      const limit = chatRateLimiter.check(`chat:${userId}`)
+      reply.header('X-RateLimit-Remaining', String(limit.remaining))
+      reply.header('X-RateLimit-Reset', String(limit.resetAt))
+
+      if (!limit.allowed) {
+        return reply.status(429).send({
+          error: 'rate_limited',
+          retryAfterMs: Math.max(0, limit.resetAt - Date.now()),
+        })
+      }
+    }
+
     const body = BackendChatRequestSchema.parse(request.body)
     const response = await chatClient({
       messages: body.messages,

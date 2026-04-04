@@ -1,0 +1,171 @@
+# Epic 11: Persistence & App Sessions
+
+## Dependencies
+
+- Depends on: `04-approval-and-governance.md`, `08-observability-and-tracing.md`, `09-auth-and-access-control.md`
+- Informs: `10-backend-owned-generation-and-streaming.md`, `12-teacher-admin-surfaces.md`, `13-real-app-integrations.md`
+
+## Status
+
+- Implemented now:
+  - file-backed backend store for registry, allowlists, review actions, and audit events
+  - frontend session-owned active app runtime state
+- Not implemented yet:
+  - Supabase/Postgres persistence for control-plane and app-session data
+  - backend-owned canonical app session state
+  - reload/reconnect recovery from backend truth
+
+## Context
+
+The current Bridge backend still relies on a file-backed store for registry entries, allowlists, and audit events, while active app state still leans on frontend session state. That is acceptable for internal prototyping, but not for a durable educational platform. This epic defines the shift to Supabase/Postgres-backed persistence and backend-owned app/session state.
+
+---
+
+## User Stories
+
+### US-11.1: Core Bridge data is stored durably in Postgres
+
+**As a** platform engineer,  
+**I want** registry, approvals, allowlists, audit events, and app sessions stored in Postgres,  
+**so that** ChatBridge survives restarts and supports real operations.
+
+#### Acceptance Criteria
+
+- File-backed storage is replaced by durable database-backed storage.
+- Registry entries persist across deploys and backend restarts.
+- Teacher allowlists persist across deploys and backend restarts.
+- Audit events persist across deploys and backend restarts.
+- The backend can boot without data loss from ephemeral local files.
+
+#### Testing
+
+- Integration tests verify writes survive process restart.
+- Migration tests verify seeded/local dev data can be upgraded safely.
+- Manual test confirms a redeploy does not wipe registry or allowlist data.
+
+#### Spec
+
+**Initial database tables:**
+
+```
+apps
+app_versions
+review_actions
+class_allowlists
+audit_events
+app_sessions
+app_context_snapshots
+```
+
+**Recommended ownership split:**
+
+```
+Supabase Auth
+  users
+
+Bridge backend / Postgres
+  apps
+  app_versions
+  review_actions
+  class_allowlists
+  audit_events
+  app_sessions
+  app_context_snapshots
+```
+
+---
+
+### US-11.2: Active app state is backend-owned
+
+**As a** platform engineer,  
+**I want** the canonical app session state to live on the backend,  
+**so that** the frontend becomes a runtime shell rather than the source of truth.
+
+#### Acceptance Criteria
+
+- Active app/session state is persisted server-side.
+- The backend stores the latest safe `appContext` summary and state snapshot.
+- The frontend can reconnect and recover active app state from backend truth.
+- App state written to the transcript/LLM context is derived from backend state, not volatile iframe memory.
+
+#### Testing
+
+- Integration tests verify app state survives page refresh.
+- Manual test confirms reopening a session restores the active app and latest summary.
+- Validation tests verify only schema-approved state is persisted.
+
+#### Spec
+
+**State ownership model:**
+
+```
+iframe:
+  volatile UI state only
+
+frontend:
+  runtime view state
+
+backend:
+  canonical app session state
+  canonical app context summary
+```
+
+**Design rule:**
+- The iframe may propose state.
+- The backend decides what is durable, safe, and model-visible.
+
+---
+
+### US-11.3: Session/app reconciliation works after disconnects and reloads
+
+**As a** student,  
+**I want** TutorMeAI to recover gracefully if I refresh the page or lose connection,  
+**so that** my conversation and app session do not disappear.
+
+#### Acceptance Criteria
+
+- A page reload restores chat history and active app state.
+- If an app was active before reload, the frontend can rehydrate the panel from backend state.
+- If the iframe app itself cannot resume, TutorMeAI surfaces the last safe summary and continues chat.
+
+#### Testing
+
+- Manual test verifies reload recovery for the Weather app.
+- Future manual tests verify recovery for long-lived apps like Chess and Story Builder.
+
+#### Spec
+
+**Reconnect flow:**
+
+```
+frontend opens session
+  -> GET backend session/app state
+  -> rehydrate active app panel
+  -> send fresh INIT to iframe with canonical last-safe state
+  -> continue from backend summary if iframe cannot resume
+```
+
+---
+
+### US-11.4: Backend persistence is compatible with Supabase Auth and audit needs
+
+**As a** platform owner,  
+**I want** stored records to relate cleanly to authenticated users and future school/org data,  
+**so that** permissions and audit history remain coherent.
+
+#### Acceptance Criteria
+
+- Records can be associated with user IDs and roles.
+- Audit records can be queried by user, session, app, and class.
+- Sensitive credential material remains excluded from normal relational event payloads.
+
+#### Testing
+
+- Schema tests verify required foreign-key or reference fields exist for user/session relations.
+- Manual query checks verify audit records can be filtered by user and class.
+
+## Out of Scope
+
+- analytics warehouse design
+- long-term archival policy
+- district SIS integration
