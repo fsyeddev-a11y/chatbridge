@@ -381,19 +381,12 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 }
 
 async function bootstrapSeedData(client: SupabaseClient) {
-  const { count: appCount, error: appCountError } = await client
-    .from('apps')
-    .select('app_id', { count: 'exact', head: true })
-
-  if (appCountError) {
-    throw appCountError
-  }
-
   const seedData = createSupabaseSeedData()
 
-  if (!appCount) {
+  const missingRegistryEntries = await getMissingSeedRegistryEntries(client, seedData.registryEntries)
+  if (missingRegistryEntries.length) {
     const { error: seedAppsError } = await client.from('apps').upsert(
-      seedData.registryEntries.map((entry) => ({
+      missingRegistryEntries.map((entry) => ({
         app_id: entry.manifest.appId,
         review_state: entry.reviewState,
         registered_at: entry.registeredAt,
@@ -409,17 +402,10 @@ async function bootstrapSeedData(client: SupabaseClient) {
     }
   }
 
-  const { count: allowlistCount, error: allowlistCountError } = await client
-    .from('class_allowlists')
-    .select('id', { count: 'exact', head: true })
-
-  if (allowlistCountError) {
-    throw allowlistCountError
-  }
-
-  if (!allowlistCount) {
+  const missingAllowlistEntries = await getMissingSeedAllowlistEntries(client, seedData.classAllowlist)
+  if (missingAllowlistEntries.length) {
     const { error: seedAllowlistError } = await client.from('class_allowlists').upsert(
-      seedData.classAllowlist.map((entry) => ({
+      missingAllowlistEntries.map((entry) => ({
         id: `${entry.classId}:${entry.appId}`,
         class_id: entry.classId,
         app_id: entry.appId,
@@ -434,6 +420,52 @@ async function bootstrapSeedData(client: SupabaseClient) {
       throw seedAllowlistError
     }
   }
+}
+
+export async function getMissingSeedRegistryEntries(
+  client: SupabaseClient,
+  seedEntries: AppRegistryEntry[]
+) {
+  const seedAppIds = seedEntries.map((entry) => entry.manifest.appId)
+  if (!seedAppIds.length) {
+    return []
+  }
+
+  const { data: existingRows, error } = await client
+    .from('apps')
+    .select('app_id')
+    .in('app_id', seedAppIds)
+    .returns<Array<Pick<SupabaseBridgeStoreRow, 'app_id'>>>()
+
+  if (error) {
+    throw error
+  }
+
+  const existingAppIds = new Set((existingRows || []).map((row) => row.app_id))
+  return seedEntries.filter((entry) => !existingAppIds.has(entry.manifest.appId))
+}
+
+export async function getMissingSeedAllowlistEntries(
+  client: SupabaseClient,
+  seedEntries: ClassAppAllowlist[]
+) {
+  const seedIds = seedEntries.map((entry) => `${entry.classId}:${entry.appId}`)
+  if (!seedIds.length) {
+    return []
+  }
+
+  const { data: existingRows, error } = await client
+    .from('class_allowlists')
+    .select('id')
+    .in('id', seedIds)
+    .returns<Array<Pick<SupabaseAllowlistRow, 'id'>>>()
+
+  if (error) {
+    throw error
+  }
+
+  const existingIds = new Set((existingRows || []).map((row) => row.id))
+  return seedEntries.filter((entry) => !existingIds.has(`${entry.classId}:${entry.appId}`))
 }
 
 function createSupabaseBridgeStoreClient() {
