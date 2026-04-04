@@ -11,6 +11,18 @@ type BridgeSessionApiResponse = {
   updatedAt?: number
 }
 
+function normalizeBridgeState(bridgeState: SessionBridgeState | undefined): SessionBridgeState | undefined {
+  if (!bridgeState) {
+    return undefined
+  }
+
+  return {
+    ...bridgeState,
+    activeClassId: bridgeState.activeClassId || DEFAULT_CHATBRIDGE_CLASS_ID,
+    appContext: bridgeState.appContext || {},
+  }
+}
+
 export function getSessionBridgeState(session: Session): SessionBridgeState {
   return {
     ...session.bridgeState,
@@ -56,9 +68,22 @@ async function persistBridgeSessionStateToBackend(sessionId: string, bridgeState
 
 async function syncBridgeStateToBackend(sessionId: string, bridgeState: SessionBridgeState) {
   try {
-    await persistBridgeSessionStateToBackend(sessionId, bridgeState)
+    const response = await persistBridgeSessionStateToBackend(sessionId, bridgeState)
+    const canonicalBridgeState = normalizeBridgeState(response.bridgeState)
+
+    if (!canonicalBridgeState) {
+      return bridgeState
+    }
+
+    await chatStore.updateSessionWithMessages(sessionId, (currentSession) => ({
+      ...currentSession,
+      bridgeState: canonicalBridgeState,
+    }))
+
+    return canonicalBridgeState
   } catch (error) {
     console.warn('Failed to persist ChatBridge session state', error)
+    return bridgeState
   }
 }
 
@@ -75,10 +100,9 @@ export async function hydrateBridgeStateFromBackend(sessionId: string) {
       return undefined
     }
 
-    const normalized = {
-      ...backendBridgeState,
-      activeClassId: backendBridgeState.activeClassId || DEFAULT_CHATBRIDGE_CLASS_ID,
-      appContext: backendBridgeState.appContext || {},
+    const normalized = normalizeBridgeState(backendBridgeState)
+    if (!normalized) {
+      return undefined
     }
 
     const current = getSessionBridgeState(session)
@@ -122,8 +146,15 @@ export async function activateBridgeApp(sessionId: string, appId: string) {
     }
   })
 
-  await syncBridgeStateToBackend(sessionId, getSessionBridgeState(nextSession))
-  return nextSession
+  const canonicalBridgeState = await syncBridgeStateToBackend(sessionId, getSessionBridgeState(nextSession))
+  if (canonicalBridgeState === nextSession.bridgeState) {
+    return nextSession
+  }
+
+  return {
+    ...nextSession,
+    bridgeState: canonicalBridgeState,
+  }
 }
 
 export async function closeBridgeApp(sessionId: string) {
@@ -138,8 +169,15 @@ export async function closeBridgeApp(sessionId: string) {
     }
   })
 
-  await syncBridgeStateToBackend(sessionId, getSessionBridgeState(nextSession))
-  return nextSession
+  const canonicalBridgeState = await syncBridgeStateToBackend(sessionId, getSessionBridgeState(nextSession))
+  if (canonicalBridgeState === nextSession.bridgeState) {
+    return nextSession
+  }
+
+  return {
+    ...nextSession,
+    bridgeState: canonicalBridgeState,
+  }
 }
 
 export async function updateBridgeAppContext(sessionId: string, appId: string, nextState: Partial<BridgeAppContext>) {
@@ -165,6 +203,13 @@ export async function updateBridgeAppContext(sessionId: string, appId: string, n
     }
   })
 
-  await syncBridgeStateToBackend(sessionId, getSessionBridgeState(nextSession))
-  return nextSession
+  const canonicalBridgeState = await syncBridgeStateToBackend(sessionId, getSessionBridgeState(nextSession))
+  if (canonicalBridgeState === nextSession.bridgeState) {
+    return nextSession
+  }
+
+  return {
+    ...nextSession,
+    bridgeState: canonicalBridgeState,
+  }
 }

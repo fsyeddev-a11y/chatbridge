@@ -17,7 +17,7 @@ vi.mock('@/packages/supabase', () => ({
   getSupabaseAuthHeaders: getSupabaseAuthHeadersMock,
 }))
 
-import { activateBridgeApp, hydrateBridgeStateFromBackend } from './session'
+import { activateBridgeApp, closeBridgeApp, hydrateBridgeStateFromBackend, updateBridgeAppContext } from './session'
 
 describe('ChatBridge session helpers', () => {
   beforeEach(() => {
@@ -135,5 +135,110 @@ describe('ChatBridge session helpers', () => {
 
     expect(updated.bridgeState?.activeAppId).toBe('weather')
     expect(updated.bridgeState?.appContext.weather.summary).toBe('Chicago is 72F and sunny.')
+  })
+
+  it('adopts backend-returned canonical bridge state after activation', async () => {
+    updateSessionWithMessagesMock.mockImplementation(async (_sessionId, updater) =>
+      updater({
+        id: 'session-1',
+        name: 'Bridge Session',
+        messages: [],
+        bridgeState: {
+          activeClassId: 'demo-class',
+          appContext: {},
+        },
+      } satisfies Session)
+    )
+
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        sessionId: 'session-1',
+        bridgeState: {
+          activeClassId: 'server-class',
+          activeAppId: 'weather',
+          appContext: {
+            weather: {
+              appId: 'weather',
+              status: 'ready',
+              summary: 'Server canonical weather state.',
+            },
+          },
+        },
+      }),
+    })
+
+    const result = await activateBridgeApp('session-1', 'weather')
+
+    expect(result.bridgeState?.activeClassId).toBe('server-class')
+    expect(result.bridgeState?.appContext.weather.summary).toBe('Server canonical weather state.')
+    expect(updateSessionWithMessagesMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('adopts backend-returned canonical bridge state after context updates and close', async () => {
+    updateSessionWithMessagesMock.mockImplementation(async (_sessionId, updater) =>
+      updater({
+        id: 'session-1',
+        name: 'Bridge Session',
+        messages: [],
+        bridgeState: {
+          activeClassId: 'demo-class',
+          activeAppId: 'weather',
+          appContext: {
+            weather: {
+              appId: 'weather',
+              status: 'active',
+              summary: 'Local summary',
+            },
+          },
+        },
+      } satisfies Session)
+    )
+
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessionId: 'session-1',
+          bridgeState: {
+            activeClassId: 'demo-class',
+            activeAppId: 'weather',
+            appContext: {
+              weather: {
+                appId: 'weather',
+                status: 'complete',
+                summary: 'Canonical backend summary',
+              },
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          sessionId: 'session-1',
+          bridgeState: {
+            activeClassId: 'demo-class',
+            appContext: {
+              weather: {
+                appId: 'weather',
+                status: 'complete',
+                summary: 'Canonical backend summary',
+              },
+            },
+          },
+        }),
+      })
+
+    const updated = await updateBridgeAppContext('session-1', 'weather', {
+      status: 'error',
+      summary: 'Frontend optimistic state',
+    })
+    const closed = await closeBridgeApp('session-1')
+
+    expect(updated.bridgeState?.appContext.weather.status).toBe('complete')
+    expect(updated.bridgeState?.appContext.weather.summary).toBe('Canonical backend summary')
+    expect(closed.bridgeState?.activeAppId).toBeUndefined()
+    expect(closed.bridgeState?.appContext.weather.summary).toBe('Canonical backend summary')
   })
 })
