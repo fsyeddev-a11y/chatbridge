@@ -556,6 +556,17 @@ function buildMockFrame(config: {
       </div>
     </div>
     <script>
+      var readySent = false
+
+      function sendReady() {
+        if (readySent) {
+          return
+        }
+
+        readySent = true
+        ${readyScript}
+      }
+
       function sendHeartbeat() {
         window.parent.postMessage({
           source: 'chatbridge-app',
@@ -575,6 +586,7 @@ function buildMockFrame(config: {
         if (data.type === 'INIT') {
           var classId = data.payload && data.payload.classId ? data.payload.classId : 'unknown-class'
           status.textContent = 'INIT received for ' + classId + '. Ready to send events.'
+          sendReady()
           return
         }
 
@@ -584,13 +596,20 @@ function buildMockFrame(config: {
           return
         }
 
+        if (data.type === 'AUTH_RESULT') {
+          status.textContent = data.payload && data.payload.success
+            ? 'Authorization updated. Ready to continue.'
+            : 'Authorization cleared.'
+          return
+        }
+
         if (data.type === 'TERMINATE') {
           status.textContent = 'TutorMeAI ended the app session.'
         }
       })
 
       document.getElementById('ready-btn').addEventListener('click', function () {
-        ${readyScript}
+        sendReady()
       })
       document.getElementById('state-btn').addEventListener('click', function () {
         ${stateScript}
