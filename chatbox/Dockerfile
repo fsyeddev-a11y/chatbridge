@@ -6,6 +6,7 @@ RUN npm install -g pnpm@10.15.1
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc .node-version ./
 COPY release/app/package.json release/app/package.json
+COPY patches patches
 
 RUN pnpm install --frozen-lockfile
 
