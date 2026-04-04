@@ -1,0 +1,17 @@
+.git
+.github
+node_modules
+release/app/dist
+dist
+coverage
+.DS_Store
+test
+doc
+docs
+tasks
+team-sharing
+scripts
+ERROR_HANDLING.md
+README.md
+vitest.config.mts
+.erb/scripts/*.log
