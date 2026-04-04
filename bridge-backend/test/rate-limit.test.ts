@@ -4,10 +4,12 @@ import {
   createConfiguredChatRateLimiter,
   createConfiguredChatRateLimiterSet,
   createConfiguredMutationRateLimiterSet,
+  createConfiguredToolRateLimiterSet,
   createInMemoryFixedWindowRateLimiter,
   getConfiguredChatRateLimit,
   getConfiguredChatRateLimiterSet,
   getConfiguredMutationRateLimit,
+  getConfiguredToolRateLimit,
 } from '../src/rate-limit.js'
 
 describe('bridge-backend rate limiting', () => {
@@ -134,6 +136,35 @@ describe('bridge-backend rate limiting', () => {
       else process.env.CHATBRIDGE_MUTATION_RATE_LIMIT_MAX_REQUESTS = originalMax
       if (originalWindow === undefined) delete process.env.CHATBRIDGE_MUTATION_RATE_LIMIT_WINDOW_MS
       else process.env.CHATBRIDGE_MUTATION_RATE_LIMIT_WINDOW_MS = originalWindow
+    }
+  })
+
+  it('parses tool rate limit env safely', () => {
+    assert.deepEqual(getConfiguredToolRateLimit(undefined, undefined), {
+      maxRequests: 0,
+      windowMs: 60_000,
+    })
+    assert.deepEqual(getConfiguredToolRateLimit('3', '15000'), {
+      maxRequests: 3,
+      windowMs: 15000,
+    })
+  })
+
+  it('creates a tool rate limiter only when configured', () => {
+    const originalMax = process.env.CHATBRIDGE_TOOL_RATE_LIMIT_MAX_REQUESTS
+    const originalWindow = process.env.CHATBRIDGE_TOOL_RATE_LIMIT_WINDOW_MS
+
+    process.env.CHATBRIDGE_TOOL_RATE_LIMIT_MAX_REQUESTS = '2'
+    process.env.CHATBRIDGE_TOOL_RATE_LIMIT_WINDOW_MS = '30000'
+
+    try {
+      const limiterSet = createConfiguredToolRateLimiterSet()
+      assert.ok(limiterSet.perUserPerApp)
+    } finally {
+      if (originalMax === undefined) delete process.env.CHATBRIDGE_TOOL_RATE_LIMIT_MAX_REQUESTS
+      else process.env.CHATBRIDGE_TOOL_RATE_LIMIT_MAX_REQUESTS = originalMax
+      if (originalWindow === undefined) delete process.env.CHATBRIDGE_TOOL_RATE_LIMIT_WINDOW_MS
+      else process.env.CHATBRIDGE_TOOL_RATE_LIMIT_WINDOW_MS = originalWindow
     }
   })
 })

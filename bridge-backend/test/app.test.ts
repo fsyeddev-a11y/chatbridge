@@ -594,6 +594,63 @@ describe('bridge-backend app', () => {
     assert.equal(auditEvents.some((event) => event.eventType === 'ChatBridgeToolInvoked'), true)
   })
 
+  it('rate-limits repeated backend tool invocations per user and app', async () => {
+    const store = createInMemoryBridgeStore()
+    const toolCallingChatClient: ChatCompletionClient = async ({ tools }) => {
+      const weatherTool = tools?.find((tool) => tool.name === 'chatbridge_weather_lookup')
+      assert.ok(weatherTool)
+      const toolResult = await weatherTool.execute()
+      return {
+        content: `I opened ${toolResult.appName} for the student.`,
+        model: 'gpt-4o-mini',
+        toolResults: [toolResult],
+      }
+    }
+
+    const app = createApp({
+      store,
+      authVerifier: allowAllAuth,
+      chatClient: toolCallingChatClient,
+      toolRateLimiterSet: {
+        perUserPerApp: createInMemoryFixedWindowRateLimiter(1, 60_000),
+      },
+    })
+
+    const firstResponse = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        sessionId: 'session-tools-2',
+        classId: 'demo-class',
+        messages: [{ role: 'user', content: 'Open the weather app.' }],
+      },
+    })
+
+    const secondResponse = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        sessionId: 'session-tools-2',
+        classId: 'demo-class',
+        messages: [{ role: 'user', content: 'Open the weather app again.' }],
+      },
+    })
+
+    assert.equal(firstResponse.statusCode, 200)
+    assert.equal(secondResponse.statusCode, 429)
+    assert.equal(secondResponse.json().error, 'rate_limited')
+    assert.equal(secondResponse.json().scope, 'tool:weather')
+
+    const auditEvents = await store.listAuditEvents()
+    assert.equal(auditEvents.some((event) => event.eventType === 'ToolRateLimitExceeded'), true)
+  })
+
   it('rate-limits backend chat generation when configured', async () => {
     const app = createApp({
       store: createInMemoryBridgeStore(),

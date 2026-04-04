@@ -1,6 +1,28 @@
 import type { BackendChatToolDefinition, BackendChatToolResult } from './chat.js'
 import type { BridgeStore } from './store.js'
+import type { RateLimiter } from './rate-limit.js'
 import type { AppRegistryEntry, BridgeAppContext, SessionBridgeState } from './types.js'
+
+export class ChatBridgeToolPolicyError extends Error {
+  statusCode: number
+  errorCode: 'rate_limited' | 'policy_denied'
+  metadata?: Record<string, unknown>
+
+  constructor(
+    message: string,
+    input: {
+      statusCode: number
+      errorCode: 'rate_limited' | 'policy_denied'
+      metadata?: Record<string, unknown>
+    }
+  ) {
+    super(message)
+    this.name = 'ChatBridgeToolPolicyError'
+    this.statusCode = input.statusCode
+    this.errorCode = input.errorCode
+    this.metadata = input.metadata
+  }
+}
 
 function buildToolSummary(app: AppRegistryEntry, existingContext: BridgeAppContext | undefined) {
   return (
@@ -72,6 +94,7 @@ export async function createChatBridgeToolDefinitions(input: {
   classId?: string
   bridgeState?: SessionBridgeState
   traceId: string
+  toolRateLimiter?: RateLimiter | null
 }): Promise<BackendChatToolDefinition[]> {
   if (!input.sessionId || !input.userId || !input.classId) {
     return []
@@ -82,6 +105,38 @@ export async function createChatBridgeToolDefinitions(input: {
       name: tool.name,
       description: `${tool.description} Launches or resumes the "${app.manifest.name}" ChatBridge app inside TutorMeAI.`,
       execute: async () => {
+        if (input.toolRateLimiter) {
+          const rateLimitResult = input.toolRateLimiter.check(`tool:${input.userId}:${app.manifest.appId}`)
+          if (!rateLimitResult.allowed) {
+            const retryAfterMs = Math.max(0, rateLimitResult.resetAt - Date.now())
+            await input.store.appendAuditEvent({
+              timestamp: Date.now(),
+              traceId: input.traceId,
+              eventType: 'ToolRateLimitExceeded',
+              source: 'bridge-backend',
+              sessionId: input.sessionId,
+              classId: input.classId,
+              appId: app.manifest.appId,
+              appVersion: app.manifest.version,
+              summary: `Backend denied ${tool.name} due to tool rate limiting.`,
+              metadata: {
+                toolName: tool.name,
+                retryAfterMs,
+                scope: 'per_user_per_app',
+              },
+            })
+
+            throw new ChatBridgeToolPolicyError(`${tool.name} is temporarily rate limited.`, {
+              statusCode: 429,
+              errorCode: 'rate_limited',
+              metadata: {
+                scope: `tool:${app.manifest.appId}`,
+                retryAfterMs,
+              },
+            })
+          }
+        }
+
         const updatedBridgeState = nextBridgeState({
           app,
           bridgeState: input.bridgeState,

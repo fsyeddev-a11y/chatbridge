@@ -4,14 +4,16 @@ import { ZodError } from 'zod'
 import { createSupabaseAuthVerifier, getBearerToken, type AuthVerifier } from './auth.js'
 import { createOpenAIChatClient, type ChatCompletionClient } from './chat.js'
 import { prependChatBridgeOrchestrationMessage } from './chatbridge-orchestration.js'
-import { createChatBridgeToolDefinitions } from './chatbridge-tools.js'
+import { ChatBridgeToolPolicyError, createChatBridgeToolDefinitions } from './chatbridge-tools.js'
 import {
   createConfiguredChatRateLimiterSet,
   createConfiguredMutationRateLimiterSet,
+  createConfiguredToolRateLimiterSet,
   type ChatRateLimiterSet,
   type MutationRateLimiterSet,
   type RateLimitCheckResult,
   type RateLimiter,
+  type ToolRateLimiterSet,
 } from './rate-limit.js'
 import {
   AppIdParamsSchema,
@@ -35,6 +37,7 @@ export type AppOptions = {
   chatRateLimiter?: RateLimiter | null
   chatRateLimiterSet?: ChatRateLimiterSet
   mutationRateLimiterSet?: MutationRateLimiterSet
+  toolRateLimiterSet?: ToolRateLimiterSet
 }
 
 const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://localhost:4173']
@@ -66,6 +69,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     perIp: configuredRateLimiterSet.perIp,
   }
   const mutationRateLimiterSet = options.mutationRateLimiterSet ?? createConfiguredMutationRateLimiterSet()
+  const toolRateLimiterSet = options.toolRateLimiterSet ?? createConfiguredToolRateLimiterSet()
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin
@@ -376,6 +380,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       classId: effectiveClassId,
       bridgeState,
       traceId,
+      toolRateLimiter: toolRateLimiterSet.perUserPerApp,
     })
 
     await store.appendAuditEvent({
@@ -424,6 +429,28 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
         bridgeState: updatedBridgeState,
       })
     } catch (error) {
+      if (error instanceof ChatBridgeToolPolicyError) {
+        await store.appendAuditEvent({
+          timestamp: Date.now(),
+          traceId,
+          eventType: 'ModelInvocationFailed',
+          source: 'bridge-backend',
+          sessionId: body.sessionId,
+          classId: effectiveClassId,
+          appId: bridgeState?.activeAppId,
+          summary: 'Backend-owned model invocation failed due to ChatBridge tool policy.',
+          metadata: {
+            resultCategory: error.errorCode,
+            ...(error.metadata || {}),
+          },
+        })
+
+        return reply.status(error.statusCode).send({
+          error: error.errorCode,
+          ...(error.metadata || {}),
+        })
+      }
+
       await store.appendAuditEvent({
         timestamp: Date.now(),
         traceId,

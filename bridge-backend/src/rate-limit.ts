@@ -18,6 +18,10 @@ export type MutationRateLimiterSet = {
   perUser: RateLimiter | null
 }
 
+export type ToolRateLimiterSet = {
+  perUserPerApp: RateLimiter | null
+}
+
 type CounterEntry = {
   count: number
   resetAt: number
@@ -151,6 +155,23 @@ export function createConfiguredMutationRateLimiterSet(): MutationRateLimiterSet
 
   return {
     perUser: configured.maxRequests
+      ? createInMemoryFixedWindowRateLimiter(configured.maxRequests, configured.windowMs)
+      : null,
+  }
+}
+
+export function getConfiguredToolRateLimit(
+  maxRequestsValue = process.env.CHATBRIDGE_TOOL_RATE_LIMIT_MAX_REQUESTS,
+  windowMsValue = process.env.CHATBRIDGE_TOOL_RATE_LIMIT_WINDOW_MS
+) {
+  return getConfiguredNamedRateLimit(maxRequestsValue, windowMsValue)
+}
+
+export function createConfiguredToolRateLimiterSet(): ToolRateLimiterSet {
+  const configured = getConfiguredToolRateLimit()
+
+  return {
+    perUserPerApp: configured.maxRequests
       ? createInMemoryFixedWindowRateLimiter(configured.maxRequests, configured.windowMs)
       : null,
   }
