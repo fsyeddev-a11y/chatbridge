@@ -14,6 +14,10 @@ export type ChatRateLimiterSet = {
   perIp: RateLimiter | null
 }
 
+export type MutationRateLimiterSet = {
+  perUser: RateLimiter | null
+}
+
 type CounterEntry = {
   count: number
   resetAt: number
@@ -93,6 +97,13 @@ function getConfiguredNamedRateLimit(
   }
 }
 
+export function getConfiguredMutationRateLimit(
+  maxRequestsValue = process.env.CHATBRIDGE_MUTATION_RATE_LIMIT_MAX_REQUESTS,
+  windowMsValue = process.env.CHATBRIDGE_MUTATION_RATE_LIMIT_WINDOW_MS
+) {
+  return getConfiguredNamedRateLimit(maxRequestsValue, windowMsValue)
+}
+
 export function getConfiguredChatRateLimiterSet(env = process.env): {
   perUser: { maxRequests: number; windowMs: number }
   perSession: { maxRequests: number; windowMs: number }
@@ -131,6 +142,16 @@ export function createConfiguredChatRateLimiterSet(): ChatRateLimiterSet {
       : null,
     perIp: configured.perIp.maxRequests
       ? createInMemoryFixedWindowRateLimiter(configured.perIp.maxRequests, configured.perIp.windowMs)
+      : null,
+  }
+}
+
+export function createConfiguredMutationRateLimiterSet(): MutationRateLimiterSet {
+  const configured = getConfiguredMutationRateLimit()
+
+  return {
+    perUser: configured.maxRequests
+      ? createInMemoryFixedWindowRateLimiter(configured.maxRequests, configured.windowMs)
       : null,
   }
 }

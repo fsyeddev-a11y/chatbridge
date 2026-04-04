@@ -541,6 +541,74 @@ describe('bridge-backend app', () => {
     assert.equal(secondResponse.json().scope, 'session')
   })
 
+  it('rate-limits repeated registry mutations when configured', async () => {
+    const app = createApp({
+      store: createInMemoryBridgeStore(),
+      authVerifier: allowAllAuth,
+      chatClient: fakeChatClient,
+      mutationRateLimiterSet: {
+        perUser: createInMemoryFixedWindowRateLimiter(1, 60_000),
+      },
+    })
+
+    const firstResponse = await app.inject({
+      method: 'POST',
+      url: '/api/registry/apps',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        appId: 'story-builder',
+        name: 'AI Story Builder',
+        version: '1.0.0',
+        description: 'Structured story building for students.',
+        developerName: 'Developer',
+        executionModel: 'iframe',
+        allowedOrigins: ['https://apps.example.com'],
+        authType: 'none',
+        subjectTags: ['ELA'],
+        llmSafeFields: ['chapterTitle'],
+        tools: [
+          {
+            name: 'chatbridge_story_builder_open',
+            description: 'Open the story builder.',
+          },
+        ],
+      },
+    })
+
+    const secondResponse = await app.inject({
+      method: 'POST',
+      url: '/api/registry/apps',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        appId: 'story-builder-2',
+        name: 'AI Story Builder Two',
+        version: '1.0.0',
+        description: 'Structured story building for students.',
+        developerName: 'Developer',
+        executionModel: 'iframe',
+        allowedOrigins: ['https://apps.example.com'],
+        authType: 'none',
+        subjectTags: ['ELA'],
+        llmSafeFields: ['chapterTitle'],
+        tools: [
+          {
+            name: 'chatbridge_story_builder_open_two',
+            description: 'Open the story builder.',
+          },
+        ],
+      },
+    })
+
+    assert.equal(firstResponse.statusCode, 201)
+    assert.equal(secondResponse.statusCode, 429)
+    assert.equal(secondResponse.json().error, 'rate_limited')
+    assert.equal(secondResponse.json().scope, 'registry_register')
+  })
+
   it('persists and reloads bridge session state through the backend session API', async () => {
     const app = createApp({
       store: createInMemoryBridgeStore(),

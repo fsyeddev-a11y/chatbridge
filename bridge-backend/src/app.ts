@@ -2,7 +2,14 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { ZodError } from 'zod'
 import { createSupabaseAuthVerifier, getBearerToken, type AuthVerifier } from './auth.js'
 import { createOpenAIChatClient, type ChatCompletionClient } from './chat.js'
-import { createConfiguredChatRateLimiterSet, type ChatRateLimiterSet, type RateLimitCheckResult, type RateLimiter } from './rate-limit.js'
+import {
+  createConfiguredChatRateLimiterSet,
+  createConfiguredMutationRateLimiterSet,
+  type ChatRateLimiterSet,
+  type MutationRateLimiterSet,
+  type RateLimitCheckResult,
+  type RateLimiter,
+} from './rate-limit.js'
 import {
   AppIdParamsSchema,
   AppManifestSchema,
@@ -24,6 +31,7 @@ export type AppOptions = {
   chatClient?: ChatCompletionClient
   chatRateLimiter?: RateLimiter | null
   chatRateLimiterSet?: ChatRateLimiterSet
+  mutationRateLimiterSet?: MutationRateLimiterSet
 }
 
 const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://localhost:4173']
@@ -54,6 +62,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     perSession: configuredRateLimiterSet.perSession,
     perIp: configuredRateLimiterSet.perIp,
   }
+  const mutationRateLimiterSet = options.mutationRateLimiterSet ?? createConfiguredMutationRateLimiterSet()
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin
@@ -144,6 +153,17 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.post('/api/registry/apps', async (request, reply) => {
+    const limited = await applyMutationRateLimit({
+      request,
+      reply,
+      store,
+      rateLimiterSet: mutationRateLimiterSet,
+      scope: 'registry_register',
+    })
+    if (limited) {
+      return limited
+    }
+
     const manifest = AppManifestSchema.parse(request.body)
     const appEntry = await store.registerApp(manifest)
     return reply.status(201).send({
@@ -152,6 +172,17 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.post('/api/registry/apps/:appId/review', async (request, reply) => {
+    const limited = await applyMutationRateLimit({
+      request,
+      reply,
+      store,
+      rateLimiterSet: mutationRateLimiterSet,
+      scope: 'registry_review',
+    })
+    if (limited) {
+      return limited
+    }
+
     const { appId } = AppIdParamsSchema.parse(request.params)
     const { reviewState, reviewerId, reviewNotes } = ReviewActionBodySchema.parse(request.body)
     const updated = await store.updateReviewState(appId, reviewState, reviewerId, reviewNotes)
@@ -183,6 +214,17 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.post('/api/classes/:classId/allowlist', async (request, reply) => {
+    const limited = await applyMutationRateLimit({
+      request,
+      reply,
+      store,
+      rateLimiterSet: mutationRateLimiterSet,
+      scope: 'class_allowlist_enable',
+    })
+    if (limited) {
+      return limited
+    }
+
     const { classId } = ClassIdParamsSchema.parse(request.params)
     const { appId, enabledBy } = ClassAllowlistBodySchema.parse(request.body)
     const allowlistEntry = await store.enableAppForClass(classId, appId, enabledBy)
@@ -199,6 +241,17 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.post('/api/classes/:classId/allowlist/:appId/disable', async (request, reply) => {
+    const limited = await applyMutationRateLimit({
+      request,
+      reply,
+      store,
+      rateLimiterSet: mutationRateLimiterSet,
+      scope: 'class_allowlist_disable',
+    })
+    if (limited) {
+      return limited
+    }
+
     const { classId } = ClassIdParamsSchema.parse(request.params)
     const { appId } = AppIdParamsSchema.parse(request.params)
     const { enabledBy } = ClassAllowlistToggleBodySchema.parse(request.body)
@@ -254,6 +307,17 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.put('/api/sessions/:sessionId/bridge-state', async (request, reply) => {
+    const limited = await applyMutationRateLimit({
+      request,
+      reply,
+      store,
+      rateLimiterSet: mutationRateLimiterSet,
+      scope: 'bridge_state_upsert',
+    })
+    if (limited) {
+      return limited
+    }
+
     const { sessionId } = SessionIdParamsSchema.parse(request.params)
     const { bridgeState } = BridgeSessionUpsertBodySchema.parse(request.body)
     const userId = request.headers['x-chatbridge-user-id']
@@ -388,6 +452,46 @@ async function applyChatRateLimits(input: {
   return input.reply.status(429).send({
     error: 'rate_limited',
     scope: firstRejected.scope,
+    retryAfterMs,
+  })
+}
+
+async function applyMutationRateLimit(input: {
+  request: FastifyRequest
+  reply: FastifyReply
+  store: BridgeStore
+  rateLimiterSet: MutationRateLimiterSet
+  scope: string
+}) {
+  const userId = input.request.headers['x-chatbridge-user-id']
+  if (!input.rateLimiterSet.perUser || typeof userId !== 'string') {
+    return null
+  }
+
+  const result = input.rateLimiterSet.perUser.check(`mutation:${input.scope}:${userId}`)
+  input.reply.header('X-RateLimit-Remaining', String(result.remaining))
+  input.reply.header('X-RateLimit-Reset', String(result.resetAt))
+
+  if (result.allowed) {
+    return null
+  }
+
+  const retryAfterMs = Math.max(0, result.resetAt - Date.now())
+  await appendAbuseAuditEvent(input.store, {
+    eventType: 'MutationRateLimitExceeded',
+    summary: `Mutation request rate limited for ${input.scope}.`,
+    metadata: {
+      scope: input.scope,
+      retryAfterMs,
+      userId,
+      path: input.request.url,
+      method: input.request.method,
+    },
+  })
+
+  return input.reply.status(429).send({
+    error: 'rate_limited',
+    scope: input.scope,
     retryAfterMs,
   })
 }

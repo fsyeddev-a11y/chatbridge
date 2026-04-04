@@ -3,9 +3,11 @@ import { describe, it } from 'node:test'
 import {
   createConfiguredChatRateLimiter,
   createConfiguredChatRateLimiterSet,
+  createConfiguredMutationRateLimiterSet,
   createInMemoryFixedWindowRateLimiter,
   getConfiguredChatRateLimit,
   getConfiguredChatRateLimiterSet,
+  getConfiguredMutationRateLimit,
 } from '../src/rate-limit.js'
 
 describe('bridge-backend rate limiting', () => {
@@ -103,6 +105,35 @@ describe('bridge-backend rate limiting', () => {
       else process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_SESSION_MAX_REQUESTS = originalSessionMax
       if (originalIpMax === undefined) delete process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_IP_MAX_REQUESTS
       else process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_IP_MAX_REQUESTS = originalIpMax
+    }
+  })
+
+  it('parses mutation rate limit env safely', () => {
+    assert.deepEqual(getConfiguredMutationRateLimit(undefined, undefined), {
+      maxRequests: 0,
+      windowMs: 60_000,
+    })
+    assert.deepEqual(getConfiguredMutationRateLimit('6', '45000'), {
+      maxRequests: 6,
+      windowMs: 45000,
+    })
+  })
+
+  it('creates a mutation rate limiter only when configured', () => {
+    const originalMax = process.env.CHATBRIDGE_MUTATION_RATE_LIMIT_MAX_REQUESTS
+    const originalWindow = process.env.CHATBRIDGE_MUTATION_RATE_LIMIT_WINDOW_MS
+
+    process.env.CHATBRIDGE_MUTATION_RATE_LIMIT_MAX_REQUESTS = '2'
+    process.env.CHATBRIDGE_MUTATION_RATE_LIMIT_WINDOW_MS = '30000'
+
+    try {
+      const limiterSet = createConfiguredMutationRateLimiterSet()
+      assert.ok(limiterSet.perUser)
+    } finally {
+      if (originalMax === undefined) delete process.env.CHATBRIDGE_MUTATION_RATE_LIMIT_MAX_REQUESTS
+      else process.env.CHATBRIDGE_MUTATION_RATE_LIMIT_MAX_REQUESTS = originalMax
+      if (originalWindow === undefined) delete process.env.CHATBRIDGE_MUTATION_RATE_LIMIT_WINDOW_MS
+      else process.env.CHATBRIDGE_MUTATION_RATE_LIMIT_WINDOW_MS = originalWindow
     }
   })
 })
