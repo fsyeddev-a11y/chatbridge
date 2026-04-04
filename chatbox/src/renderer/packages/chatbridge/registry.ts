@@ -10,6 +10,9 @@ export type ChatBridgeAppDefinition = BridgeAppManifest & {
   mockMode?: 'chess' | 'weather' | 'classroom'
   ownerUserId?: string
   ownerEmail?: string
+  reviewNotes?: string
+  reviewedAt?: number
+  registeredAt?: number
 }
 
 export type ChatBridgeAllowlistEntry = {
@@ -35,6 +38,9 @@ type RegistryApiResponse = {
     reviewState: ChatBridgeAppDefinition['reviewState']
     ownerUserId?: string
     ownerEmail?: string
+    reviewNotes?: string
+    reviewedAt?: number
+    registeredAt?: number
   }>
 }
 
@@ -57,6 +63,9 @@ type RegistryAppResponse = {
     reviewState: ChatBridgeAppDefinition['reviewState']
     ownerUserId?: string
     ownerEmail?: string
+    reviewNotes?: string
+    reviewedAt?: number
+    registeredAt?: number
   }
 }
 
@@ -159,6 +168,7 @@ const mockModeByAppId: Record<string, ChatBridgeAppDefinition['mockMode']> = {
 export const ChatBridgeQueryKeys = {
   ChatBridgeApps: ['chatbridge', 'apps'],
   ChatBridgeDeveloperApps: ['chatbridge', 'developer-apps'],
+  ChatBridgeDeveloperReviewActions: ['chatbridge', 'developer-review-actions'],
   ChatBridgeClassApps: (classId: string) => ['chatbridge', 'class-apps', classId],
   ChatBridgeClassAllowlist: (classId: string) => ['chatbridge', 'class-allowlist', classId],
   ChatBridgeReviewActions: ['chatbridge', 'review-actions'],
@@ -201,6 +211,9 @@ function normalizeRegistryEntries(entries: RegistryApiResponse['apps']): ChatBri
       reviewState: entry.reviewState,
       ownerUserId: entry.ownerUserId,
       ownerEmail: entry.ownerEmail,
+      reviewNotes: entry.reviewNotes,
+      reviewedAt: entry.reviewedAt,
+      registeredAt: entry.registeredAt,
     })
   )
 }
@@ -241,6 +254,7 @@ async function invalidateChatBridgeQueries(classId?: string) {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: ['chatbridge'] }),
     queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeDeveloperApps }),
+    queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeDeveloperReviewActions }),
     classId ? queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeClassApps(classId) }) : Promise.resolve(),
     classId
       ? queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeClassAllowlist(classId) })
@@ -311,6 +325,24 @@ export function useDeveloperChatBridgeApps() {
   })
 }
 
+export async function fetchDeveloperChatBridgeReviewActions(): Promise<ChatBridgeReviewAction[]> {
+  try {
+    const response = await fetchJson<ReviewActionsApiResponse>('/api/developer/review-actions')
+    return response.actions
+  } catch (error) {
+    console.warn('Falling back to empty developer ChatBridge review history', error)
+    return []
+  }
+}
+
+export function useDeveloperChatBridgeReviewActions() {
+  return useQuery({
+    queryKey: ChatBridgeQueryKeys.ChatBridgeDeveloperReviewActions,
+    queryFn: fetchDeveloperChatBridgeReviewActions,
+    staleTime: 30_000,
+  })
+}
+
 export function useApprovedChatBridgeAppsForClass(classId: string) {
   return useQuery({
     queryKey: ChatBridgeQueryKeys.ChatBridgeClassApps(classId),
@@ -370,6 +402,11 @@ export async function registerChatBridgeApp(manifest: BridgeAppManifest) {
   return augmentAppDefinition({
     ...response.app.manifest,
     reviewState: response.app.reviewState,
+    ownerUserId: response.app.ownerUserId,
+    ownerEmail: response.app.ownerEmail,
+    reviewNotes: response.app.reviewNotes,
+    reviewedAt: response.app.reviewedAt,
+    registeredAt: response.app.registeredAt,
   })
 }
 
@@ -386,6 +423,11 @@ export async function reviewChatBridgeApp(
   return augmentAppDefinition({
     ...response.app.manifest,
     reviewState: response.app.reviewState,
+    ownerUserId: response.app.ownerUserId,
+    ownerEmail: response.app.ownerEmail,
+    reviewNotes: response.app.reviewNotes,
+    reviewedAt: response.app.reviewedAt,
+    registeredAt: response.app.registeredAt,
   })
 }
 

@@ -203,6 +203,19 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
   })
 
+  app.get('/api/developer/review-actions', async (request, reply) => {
+    const userId = request.headers['x-chatbridge-user-id']
+    if (typeof userId !== 'string') {
+      return reply.status(401).send({
+        error: 'unauthorized',
+      })
+    }
+
+    return {
+      actions: await store.listReviewActionsForOwner(userId),
+    }
+  })
+
   app.get('/api/registry/apps/:appId', async (request, reply) => {
     const { appId } = AppIdParamsSchema.parse(request.params)
     const appEntry = await store.getRegistryEntry(appId)

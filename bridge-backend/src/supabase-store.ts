@@ -372,6 +372,28 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
       return (data || []).map(mapReviewActionRow)
     },
 
+    async listReviewActionsForOwner(userId) {
+      await ensureSeeded()
+      const ownedApps = await this.listRegistryEntriesForOwner(userId)
+      const ownedAppIds = ownedApps.map((entry) => entry.manifest.appId)
+      if (!ownedAppIds.length) {
+        return []
+      }
+
+      const { data, error } = await client
+        .from('review_actions')
+        .select('id, app_id, version, action, reviewer_id, notes, timestamp')
+        .in('app_id', ownedAppIds)
+        .order('timestamp', { ascending: false })
+        .returns<SupabaseReviewActionRow[]>()
+
+      if (error) {
+        throw error
+      }
+
+      return (data || []).map(mapReviewActionRow)
+    },
+
     async getBridgeSessionState(sessionId, userId) {
       await ensureSeeded()
       const { data, error } = await client

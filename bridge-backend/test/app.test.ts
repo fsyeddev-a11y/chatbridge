@@ -298,6 +298,61 @@ describe('bridge-backend app', () => {
     )
   })
 
+  it('returns only developer review actions for owned apps', async () => {
+    const store = createInMemoryBridgeStore()
+    await store.registerApp(
+      {
+        appId: 'story-builder',
+        name: 'AI Story Builder',
+        version: '1.0.0',
+        description: 'Structured story building for students.',
+        developerName: 'Developer',
+        executionModel: 'iframe',
+        allowedOrigins: ['https://apps.example.com'],
+        authType: 'none',
+        subjectTags: ['ELA'],
+        llmSafeFields: ['chapterTitle'],
+        tools: [
+          {
+            name: 'chatbridge_story_builder_open',
+            description: 'Open the story builder.',
+          },
+        ],
+      },
+      {
+        userId: 'user-1',
+        email: 'tester@example.com',
+      }
+    )
+    await store.updateReviewState('story-builder', 'rejected', 'admin-1', 'Add stronger moderation copy.')
+    await store.updateReviewState('weather', 'suspended', 'admin-1', 'Weather review note.')
+
+    const app = createApp({ store, authVerifier: allowAllAuth, chatClient: fakeChatClient })
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/developer/review-actions',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(
+      response.json().actions.map((action: { appId: string; action: string; notes?: string }) => ({
+        appId: action.appId,
+        action: action.action,
+        notes: action.notes,
+      })),
+      [
+        {
+          appId: 'story-builder',
+          action: 'reject',
+          notes: 'Add stronger moderation copy.',
+        },
+      ]
+    )
+  })
+
   it('selects the configured store driver safely', () => {
     assert.equal(getConfiguredStoreDriver(), 'file')
     assert.equal(getConfiguredStoreDriver('supabase'), 'supabase')

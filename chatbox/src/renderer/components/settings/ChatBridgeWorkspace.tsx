@@ -29,6 +29,7 @@ import {
   useChatBridgeAllowlist,
   useChatBridgeApps,
   useChatBridgeReviewActions,
+  useDeveloperChatBridgeReviewActions,
   useDeveloperChatBridgeApps,
 } from '@/packages/chatbridge/registry'
 
@@ -66,6 +67,7 @@ export default function ChatBridgeWorkspace() {
   const { data: allowlist = [] } = useChatBridgeAllowlist(classId)
   const { data: reviewActions = [] } = useChatBridgeReviewActions()
   const { data: developerApps = [] } = useDeveloperChatBridgeApps()
+  const { data: developerReviewActions = [] } = useDeveloperChatBridgeReviewActions()
 
   const enabledAppIds = useMemo(
     () => new Set(allowlist.filter((entry) => !entry.disabledAt).map((entry) => entry.appId)),
@@ -80,6 +82,10 @@ export default function ChatBridgeWorkspace() {
   const reviewHistory = useMemo(
     () => [...reviewActions].sort((left, right) => right.timestamp - left.timestamp).slice(0, 8),
     [reviewActions]
+  )
+  const developerReviewHistory = useMemo(
+    () => [...developerReviewActions].sort((left, right) => right.timestamp - left.timestamp),
+    [developerReviewActions]
   )
 
   const registerMutation = useMutation({
@@ -212,6 +218,36 @@ export default function ChatBridgeWorkspace() {
                     <Text size="xs" c="dimmed">
                       Owner: {app.ownerEmail || 'Current developer'}
                     </Text>
+                    <Text size="xs" c="dimmed">
+                      Submitted: {formatTimestamp(app.registeredAt)}
+                      {app.reviewedAt ? ` • Reviewed: ${formatTimestamp(app.reviewedAt)}` : ''}
+                    </Text>
+                    {app.reviewNotes ? (
+                      <Alert color={app.reviewState === 'approved' ? 'green' : app.reviewState === 'pending' ? 'blue' : 'yellow'}>
+                        Latest feedback: {app.reviewNotes}
+                      </Alert>
+                    ) : (
+                      <Text size="xs" c="dimmed">
+                        No review feedback yet. Your app is currently {app.reviewState}.
+                      </Text>
+                    )}
+
+                    {developerReviewHistory.filter((action) => action.appId === app.appId).length ? (
+                      <Stack gap={4}>
+                        <Text size="xs" fw={600} c="dimmed">
+                          Review history
+                        </Text>
+                        {developerReviewHistory
+                          .filter((action) => action.appId === app.appId)
+                          .slice(0, 3)
+                          .map((action, index) => (
+                            <Text key={`${app.appId}-${action.timestamp}-${index}`} size="xs" c="dimmed">
+                              {action.action} • v{action.version} • {formatTimestamp(action.timestamp)}
+                              {action.notes ? ` • ${action.notes}` : ''}
+                            </Text>
+                          ))}
+                      </Stack>
+                    ) : null}
                   </Stack>
                 </Card>
               ))}

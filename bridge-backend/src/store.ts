@@ -37,6 +37,7 @@ export type BridgeStore = {
   appendAuditEvent(event: AuditEvent): Awaitable<AuditEvent>
   listAuditEvents(): Awaitable<AuditEvent[]>
   listReviewActions(): Awaitable<ReviewAction[]>
+  listReviewActionsForOwner(userId: string): Awaitable<ReviewAction[]>
   getBridgeSessionState(sessionId: string, userId: string): Awaitable<SessionBridgeState | undefined>
   upsertBridgeSessionState(sessionId: string, userId: string, bridgeState: SessionBridgeState): Awaitable<BridgeSessionRecord>
 }
@@ -305,6 +306,12 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
     },
     listReviewActions() {
       return reviewActions
+    },
+    listReviewActionsForOwner(userId) {
+      const ownedAppIds = new Set(
+        registryEntries.filter((entry) => entry.ownerUserId === userId).map((entry) => entry.manifest.appId)
+      )
+      return reviewActions.filter((action) => ownedAppIds.has(action.appId))
     },
     getBridgeSessionState(sessionId, userId) {
       return bridgeSessions.find((entry) => entry.sessionId === sessionId && entry.userId === userId)?.bridgeState

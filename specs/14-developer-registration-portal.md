@@ -10,11 +10,12 @@
 - Implemented now:
   - backend manifest registration API
   - internal control-plane registration action
+  - developer-owned app dashboard
+  - owner-scoped review feedback and review-history visibility
 - Not implemented yet:
   - developer-facing auth
-  - self-serve submission UI
-  - owned app dashboard
-  - review feedback loop
+  - version-safe resubmission flow
+  - explicit approved-vs-pending version coexistence
 
 ## Context
 
