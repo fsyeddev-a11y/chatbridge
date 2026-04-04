@@ -362,6 +362,7 @@ export default function ChatBridgePanel({ session }: ChatBridgePanelProps) {
                         lastError: undefined,
                       })
                     })
+                    .then(() => closeBridgeApp(session.id))
                     .catch((error) => {
                       console.warn('Failed to revoke ChatBridge OAuth token', error)
                     })

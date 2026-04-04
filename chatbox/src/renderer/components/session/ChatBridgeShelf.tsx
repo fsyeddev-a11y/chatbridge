@@ -4,7 +4,7 @@ import { IconApps, IconChevronDown, IconChevronRight, IconExternalLink, IconLock
 import { useMemo, useState } from 'react'
 import { revokeChatBridgeOAuthToken, startChatBridgeOAuthFlow, useChatBridgeOAuthStatus } from '@/packages/chatbridge/oauth'
 import { type ChatBridgeAppDefinition, useApprovedChatBridgeAppsForClass } from '@/packages/chatbridge/registry'
-import { activateBridgeApp, getSessionBridgeState, updateBridgeAppContext } from '@/packages/chatbridge/session'
+import { activateBridgeApp, closeBridgeApp, getSessionBridgeState, updateBridgeAppContext } from '@/packages/chatbridge/session'
 
 type ChatBridgeShelfProps = {
   session: Session
@@ -96,6 +96,11 @@ function ChatBridgeShelfCard({ app, session, isActive }: ChatBridgeShelfCardProp
                       lastError: undefined,
                     })
                   )
+                  .then(() => {
+                    if (isActive) {
+                      return closeBridgeApp(session.id)
+                    }
+                  })
                   .catch((error) => {
                     console.warn('Failed to revoke ChatBridge OAuth token', error)
                   })
