@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import { ZodError } from 'zod'
 import { createSupabaseAuthVerifier, getBearerToken, type AuthVerifier } from './auth.js'
 import { createOpenAIChatClient, type ChatCompletionClient } from './chat.js'
+import { prependChatBridgeOrchestrationMessage } from './chatbridge-orchestration.js'
 import {
   createConfiguredChatRateLimiterSet,
   createConfiguredMutationRateLimiterSet,
@@ -352,11 +354,81 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       return limited
     }
 
-    const response = await chatClient({
-      messages: body.messages,
+    const authenticatedUserId = typeof userId === 'string' ? userId : undefined
+    const bridgeState =
+      body.sessionId && authenticatedUserId
+        ? await store.getBridgeSessionState(body.sessionId, authenticatedUserId)
+        : undefined
+    const effectiveClassId = body.classId || bridgeState?.activeClassId
+    const approvedApps = effectiveClassId ? await store.listApprovedAppsForClass(effectiveClassId) : []
+    const traceId = `model-${randomUUID()}`
+    const orchestratedMessages = prependChatBridgeOrchestrationMessage(body.messages, {
+      classId: effectiveClassId,
+      approvedApps,
+      bridgeState,
     })
 
-    return reply.send(response)
+    await store.appendAuditEvent({
+      timestamp: Date.now(),
+      traceId,
+      eventType: 'ModelInvocationStarted',
+      source: 'bridge-backend',
+      sessionId: body.sessionId,
+      classId: effectiveClassId,
+      appId: bridgeState?.activeAppId,
+      summary: 'Backend-owned model invocation started.',
+      metadata: {
+        model: process.env.CHATBRIDGE_OPENAI_MODEL || 'gpt-4o-mini',
+        messageCount: body.messages.length,
+        approvedAppCount: approvedApps.length,
+      },
+    })
+
+    try {
+      const response = await chatClient({
+        messages: orchestratedMessages,
+      })
+
+      await store.appendAuditEvent({
+        timestamp: Date.now(),
+        traceId,
+        eventType: 'ModelInvocationCompleted',
+        source: 'bridge-backend',
+        sessionId: body.sessionId,
+        classId: effectiveClassId,
+        appId: bridgeState?.activeAppId,
+        summary: 'Backend-owned model invocation completed.',
+        metadata: {
+          model: response.model,
+          approvedAppCount: approvedApps.length,
+          activeAppId: bridgeState?.activeAppId,
+          resultCategory: 'success',
+        },
+      })
+
+      return reply.send(response)
+    } catch (error) {
+      await store.appendAuditEvent({
+        timestamp: Date.now(),
+        traceId,
+        eventType: 'ModelInvocationFailed',
+        source: 'bridge-backend',
+        sessionId: body.sessionId,
+        classId: effectiveClassId,
+        appId: bridgeState?.activeAppId,
+        summary: 'Backend-owned model invocation failed.',
+        metadata: {
+          approvedAppCount: approvedApps.length,
+          activeAppId: bridgeState?.activeAppId,
+          resultCategory: 'provider_error',
+          errorMessage: error instanceof Error ? error.message.slice(0, 500) : 'Unknown provider failure',
+        },
+      })
+
+      return reply.status(502).send({
+        error: 'provider_unavailable',
+      })
+    }
   })
 
   return app

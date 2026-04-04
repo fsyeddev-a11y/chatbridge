@@ -438,6 +438,121 @@ describe('bridge-backend app', () => {
     })
   })
 
+  it('prepends backend-owned ChatBridge policy context to chat generation', async () => {
+    const store = createInMemoryBridgeStore()
+    await store.upsertBridgeSessionState('session-1', 'user-1', {
+      activeClassId: 'demo-class',
+      activeAppId: 'weather',
+      appContext: {
+        weather: {
+          appId: 'weather',
+          status: 'active',
+          lastState: {
+            location: 'Austin',
+            conditions: 'Sunny',
+            temperatureF: 82,
+            privateNote: 'do-not-send',
+          },
+        },
+      },
+    })
+
+    let capturedMessages: Array<{ role: string; content: string }> = []
+    const capturingChatClient: ChatCompletionClient = async ({ messages }) => {
+      capturedMessages = messages
+      return {
+        content: 'Bridge-backed answer',
+        model: 'gpt-4o-mini',
+      }
+    }
+
+    const app = createApp({ store, authVerifier: allowAllAuth, chatClient: capturingChatClient })
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        sessionId: 'session-1',
+        classId: 'demo-class',
+        messages: [
+          {
+            role: 'user',
+            content: 'Can you help me with weather?',
+          },
+        ],
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(capturedMessages[0]?.role, 'system')
+    assert.match(capturedMessages[0]?.content || '', /Class-approved ChatBridge apps:/)
+    assert.match(capturedMessages[0]?.content || '', /Weather Dashboard/)
+    assert.match(capturedMessages[0]?.content || '', /Chess Coach/)
+    assert.match(capturedMessages[0]?.content || '', /location: "Austin"/)
+    assert.doesNotMatch(capturedMessages[0]?.content || '', /privateNote/)
+  })
+
+  it('audits backend model invocation lifecycle events', async () => {
+    const store = createInMemoryBridgeStore()
+    const app = createApp({ store, authVerifier: allowAllAuth, chatClient: fakeChatClient })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        sessionId: 'session-2',
+        classId: 'demo-class',
+        messages: [
+          {
+            role: 'user',
+            content: 'Hello from TutorMeAI',
+          },
+        ],
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    const auditEvents = await store.listAuditEvents()
+    assert.equal(auditEvents.at(-2)?.eventType, 'ModelInvocationStarted')
+    assert.equal(auditEvents.at(-1)?.eventType, 'ModelInvocationCompleted')
+    assert.equal(auditEvents.at(-1)?.source, 'bridge-backend')
+  })
+
+  it('returns provider_unavailable and audits failures when backend chat invocation fails', async () => {
+    const store = createInMemoryBridgeStore()
+    const failingChatClient: ChatCompletionClient = async () => {
+      throw new Error('OpenAI unavailable')
+    }
+    const app = createApp({ store, authVerifier: allowAllAuth, chatClient: failingChatClient })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        sessionId: 'session-3',
+        classId: 'demo-class',
+        messages: [{ role: 'user', content: 'Hi' }],
+      },
+    })
+
+    assert.equal(response.statusCode, 502)
+    assert.deepEqual(response.json(), {
+      error: 'provider_unavailable',
+    })
+
+    const auditEvents = await store.listAuditEvents()
+    assert.equal(auditEvents.at(-2)?.eventType, 'ModelInvocationStarted')
+    assert.equal(auditEvents.at(-1)?.eventType, 'ModelInvocationFailed')
+  })
+
   it('rate-limits backend chat generation when configured', async () => {
     const app = createApp({
       store: createInMemoryBridgeStore(),
