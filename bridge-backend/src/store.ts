@@ -15,10 +15,17 @@ type Awaitable<T> = T | Promise<T>
 
 export type BridgeStore = {
   listRegistryEntries(): Awaitable<AppRegistryEntry[]>
+  listRegistryEntriesForOwner(userId: string): Awaitable<AppRegistryEntry[]>
   getRegistryEntry(appId: string): Awaitable<AppRegistryEntry | undefined>
   listApprovedAppsForClass(classId: string): Awaitable<AppRegistryEntry[]>
   listClassAllowlist(classId: string): Awaitable<ClassAppAllowlist[]>
-  registerApp(manifest: AppManifest): Awaitable<AppRegistryEntry>
+  registerApp(
+    manifest: AppManifest,
+    owner?: {
+      userId: string
+      email?: string
+    }
+  ): Awaitable<AppRegistryEntry>
   updateReviewState(
     appId: string,
     reviewState: AppRegistryEntry['reviewState'],
@@ -76,6 +83,8 @@ function createSeedData(): BridgeStoreData {
       reviewState: 'approved',
       registeredAt: now,
       reviewedAt: now,
+      ownerUserId: 'system-demo',
+      ownerEmail: 'demo@chatbridge.local',
       manifest: {
         appId: 'chess',
         name: 'Chess Coach',
@@ -104,6 +113,8 @@ function createSeedData(): BridgeStoreData {
       reviewState: 'approved',
       registeredAt: now,
       reviewedAt: now,
+      ownerUserId: 'system-demo',
+      ownerEmail: 'demo@chatbridge.local',
       manifest: {
         appId: 'weather',
         name: 'Weather Dashboard',
@@ -130,6 +141,8 @@ function createSeedData(): BridgeStoreData {
       reviewState: 'approved',
       registeredAt: now,
       reviewedAt: now,
+      ownerUserId: 'system-demo',
+      ownerEmail: 'demo@chatbridge.local',
       manifest: {
         appId: 'google-classroom',
         name: 'Google Classroom Assistant',
@@ -188,6 +201,9 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
     listRegistryEntries() {
       return registryEntries
     },
+    listRegistryEntriesForOwner(userId) {
+      return registryEntries.filter((entry) => entry.ownerUserId === userId)
+    },
     getRegistryEntry(appId) {
       return registryEntries.find((entry) => entry.manifest.appId === appId)
     },
@@ -202,13 +218,15 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
     listClassAllowlist(classId) {
       return classAllowlist.filter((entry) => entry.classId === classId)
     },
-    registerApp(manifest) {
+    registerApp(manifest, owner) {
       const existing = registryEntries.find((entry) => entry.manifest.appId === manifest.appId)
       const now = Date.now()
       const nextEntry: AppRegistryEntry = {
         manifest,
         reviewState: existing?.reviewState === 'approved' ? 'pending' : 'pending',
         registeredAt: existing?.registeredAt ?? now,
+        ownerUserId: owner?.userId ?? existing?.ownerUserId,
+        ownerEmail: owner?.email ?? existing?.ownerEmail,
       }
 
       if (existing) {

@@ -8,6 +8,7 @@ import {
   SimpleGrid,
   Stack,
   Text,
+  Textarea,
   TextInput,
   Title,
 } from '@mantine/core'
@@ -22,11 +23,13 @@ import {
 import {
   disableChatBridgeAppForClass,
   enableChatBridgeAppForClass,
+  fetchDeveloperChatBridgeApps,
   registerChatBridgeApp,
   reviewChatBridgeApp,
   useChatBridgeAllowlist,
   useChatBridgeApps,
   useChatBridgeReviewActions,
+  useDeveloperChatBridgeApps,
 } from '@/packages/chatbridge/registry'
 
 type ReviewFilter = 'all' | 'pending' | 'approved' | 'suspended' | 'rejected'
@@ -57,10 +60,12 @@ export default function ChatBridgeWorkspace() {
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all')
   const [statusMessage, setStatusMessage] = useState<string>()
   const [errorMessage, setErrorMessage] = useState<string>()
+  const [developerManifestJson, setDeveloperManifestJson] = useState(JSON.stringify(DEMO_STORY_BUILDER_MANIFEST, null, 2))
 
   const { data: apps = [] } = useChatBridgeApps()
   const { data: allowlist = [] } = useChatBridgeAllowlist(classId)
   const { data: reviewActions = [] } = useChatBridgeReviewActions()
+  const { data: developerApps = [] } = useDeveloperChatBridgeApps()
 
   const enabledAppIds = useMemo(
     () => new Set(allowlist.filter((entry) => !entry.disabledAt).map((entry) => entry.appId)),
@@ -86,6 +91,22 @@ export default function ChatBridgeWorkspace() {
     onError: () => {
       setStatusMessage(undefined)
       setErrorMessage('Story Builder registration failed. Check that the ChatBridge backend is available.')
+    },
+  })
+
+  const developerRegisterMutation = useMutation({
+    mutationFn: async () => {
+      const parsed = JSON.parse(developerManifestJson)
+      return registerChatBridgeApp(parsed)
+    },
+    onSuccess: async (app) => {
+      setErrorMessage(undefined)
+      setStatusMessage(`${app.name} was submitted as your developer app.`)
+      await fetchDeveloperChatBridgeApps()
+    },
+    onError: (error) => {
+      setStatusMessage(undefined)
+      setErrorMessage(error instanceof Error ? error.message : 'Developer manifest submission failed.')
     },
   })
 
@@ -144,6 +165,66 @@ export default function ChatBridgeWorkspace() {
       {errorMessage ? <Alert color="red">{errorMessage}</Alert> : null}
 
       <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
+        <Card withBorder radius="md" p="md">
+          <Stack gap="md">
+            <Group justify="space-between" align="center">
+              <Group gap={8}>
+                <IconSparkles size={16} />
+                <Title order={5}>Developer Portal</Title>
+              </Group>
+              <Badge variant="light">{developerApps.length} owned</Badge>
+            </Group>
+
+            <Text size="sm" c="dimmed">
+              Submit a manifest as the currently signed-in developer and track the apps you own.
+            </Text>
+
+            <Textarea
+              label="Manifest JSON"
+              minRows={12}
+              autosize
+              value={developerManifestJson}
+              onChange={(event) => setDeveloperManifestJson(event.currentTarget.value)}
+            />
+
+            <Group justify="flex-end">
+              <Button loading={developerRegisterMutation.isPending} onClick={() => developerRegisterMutation.mutate()}>
+                Submit Manifest
+              </Button>
+            </Group>
+
+            <Stack gap="sm">
+              {developerApps.map((app) => (
+                <Card key={app.appId} withBorder radius="md" p="sm">
+                  <Stack gap={6}>
+                    <Group justify="space-between" align="flex-start">
+                      <div>
+                        <Text fw={600}>{app.name}</Text>
+                        <Text size="xs" c="dimmed">
+                          {app.appId} • v{app.version}
+                        </Text>
+                      </div>
+                      <Badge variant="light">{app.reviewState}</Badge>
+                    </Group>
+                    <Text size="sm" c="dimmed">
+                      {app.description}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      Owner: {app.ownerEmail || 'Current developer'}
+                    </Text>
+                  </Stack>
+                </Card>
+              ))}
+
+              {!developerApps.length ? (
+                <Text size="sm" c="dimmed">
+                  You have not submitted any apps yet.
+                </Text>
+              ) : null}
+            </Stack>
+          </Stack>
+        </Card>
+
         <Card withBorder radius="md" p="md">
           <Stack gap="md">
             <Group justify="space-between" align="center">

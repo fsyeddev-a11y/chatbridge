@@ -30,6 +30,8 @@ export type AppRegistryEntry = {
   registeredAt: number
   reviewedAt?: number
   reviewNotes?: string
+  ownerUserId?: string
+  ownerEmail?: string
 }
 
 export type ClassAppAllowlist = {

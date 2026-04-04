@@ -17,6 +17,8 @@ type SupabaseBridgeStoreRow = {
   registered_at: number
   reviewed_at: number | null
   review_notes: string | null
+  owner_user_id: string | null
+  owner_email: string | null
   manifest: AppManifest
 }
 
@@ -104,11 +106,27 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
       return rows.map(mapRegistryRow)
     },
 
+    async listRegistryEntriesForOwner(userId) {
+      await ensureSeeded()
+      const { data, error } = await client
+        .from('apps')
+        .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, manifest')
+        .eq('owner_user_id', userId)
+        .order('registered_at', { ascending: false })
+        .returns<SupabaseBridgeStoreRow[]>()
+
+      if (error) {
+        throw error
+      }
+
+      return (data || []).map(mapRegistryRow)
+    },
+
     async getRegistryEntry(appId) {
       await ensureSeeded()
       const { data, error } = await client
         .from('apps')
-        .select('app_id, review_state, registered_at, reviewed_at, review_notes, manifest')
+        .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, manifest')
         .eq('app_id', appId)
         .maybeSingle<SupabaseBridgeStoreRow>()
 
@@ -139,7 +157,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 
       const { data: appRows, error: appError } = await client
         .from('apps')
-        .select('app_id, review_state, registered_at, reviewed_at, review_notes, manifest')
+        .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, manifest')
         .in('app_id', enabledAppIds)
         .eq('review_state', 'approved')
         .returns<SupabaseBridgeStoreRow[]>()
@@ -167,7 +185,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
       return (data || []).map(mapAllowlistRow)
     },
 
-    async registerApp(manifest) {
+    async registerApp(manifest, owner) {
       await ensureSeeded()
       const existing = await this.getRegistryEntry(manifest.appId)
       const now = Date.now()
@@ -178,13 +196,15 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
         registered_at: existing?.registeredAt ?? now,
         reviewed_at: null,
         review_notes: null,
+        owner_user_id: owner?.userId ?? existing?.ownerUserId ?? null,
+        owner_email: owner?.email ?? existing?.ownerEmail ?? null,
         manifest: migrateManifest(manifest),
       }
 
       const { data, error } = await client
         .from('apps')
         .upsert(row, { onConflict: 'app_id' })
-        .select('app_id, review_state, registered_at, reviewed_at, review_notes, manifest')
+        .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, manifest')
         .single<SupabaseBridgeStoreRow>()
 
       if (error) {
@@ -210,7 +230,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
           review_notes: reviewNotes ?? null,
         })
         .eq('app_id', appId)
-        .select('app_id, review_state, registered_at, reviewed_at, review_notes, manifest')
+        .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, manifest')
         .single<SupabaseBridgeStoreRow>()
 
       if (error) {
@@ -413,6 +433,8 @@ async function bootstrapSeedData(client: SupabaseClient) {
         registered_at: entry.registeredAt,
         reviewed_at: entry.reviewedAt ?? null,
         review_notes: entry.reviewNotes ?? null,
+        owner_user_id: entry.ownerUserId ?? null,
+        owner_email: entry.ownerEmail ?? null,
         manifest: entry.manifest,
       })),
       { onConflict: 'app_id' }
@@ -507,7 +529,7 @@ function createSupabaseBridgeStoreClient() {
 async function readRegistryRows(client: SupabaseClient) {
   const { data, error } = await client
     .from('apps')
-    .select('app_id, review_state, registered_at, reviewed_at, review_notes, manifest')
+    .select('app_id, review_state, registered_at, reviewed_at, review_notes, owner_user_id, owner_email, manifest')
     .order('registered_at', { ascending: true })
     .returns<SupabaseBridgeStoreRow[]>()
 
@@ -525,6 +547,8 @@ function mapRegistryRow(row: SupabaseBridgeStoreRow): AppRegistryEntry {
     registeredAt: row.registered_at,
     reviewedAt: row.reviewed_at ?? undefined,
     reviewNotes: row.review_notes ?? undefined,
+    ownerUserId: row.owner_user_id ?? undefined,
+    ownerEmail: row.owner_email ?? undefined,
   }
 }
 

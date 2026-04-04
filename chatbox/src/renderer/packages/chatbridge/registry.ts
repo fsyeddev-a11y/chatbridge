@@ -8,6 +8,8 @@ export type ChatBridgeAppDefinition = BridgeAppManifest & {
   enabledClassIds: string[]
   llmOwnership: 'platform'
   mockMode?: 'chess' | 'weather' | 'classroom'
+  ownerUserId?: string
+  ownerEmail?: string
 }
 
 export type ChatBridgeAllowlistEntry = {
@@ -31,6 +33,8 @@ type RegistryApiResponse = {
   apps: Array<{
     manifest: BridgeAppManifest
     reviewState: ChatBridgeAppDefinition['reviewState']
+    ownerUserId?: string
+    ownerEmail?: string
   }>
 }
 
@@ -51,6 +55,8 @@ type RegistryAppResponse = {
   app: {
     manifest: BridgeAppManifest
     reviewState: ChatBridgeAppDefinition['reviewState']
+    ownerUserId?: string
+    ownerEmail?: string
   }
 }
 
@@ -152,6 +158,7 @@ const mockModeByAppId: Record<string, ChatBridgeAppDefinition['mockMode']> = {
 
 export const ChatBridgeQueryKeys = {
   ChatBridgeApps: ['chatbridge', 'apps'],
+  ChatBridgeDeveloperApps: ['chatbridge', 'developer-apps'],
   ChatBridgeClassApps: (classId: string) => ['chatbridge', 'class-apps', classId],
   ChatBridgeClassAllowlist: (classId: string) => ['chatbridge', 'class-allowlist', classId],
   ChatBridgeReviewActions: ['chatbridge', 'review-actions'],
@@ -192,6 +199,8 @@ function normalizeRegistryEntries(entries: RegistryApiResponse['apps']): ChatBri
     augmentAppDefinition({
       ...entry.manifest,
       reviewState: entry.reviewState,
+      ownerUserId: entry.ownerUserId,
+      ownerEmail: entry.ownerEmail,
     })
   )
 }
@@ -231,6 +240,7 @@ async function sendJson<T>(path: string, method: 'POST', body: Record<string, un
 async function invalidateChatBridgeQueries(classId?: string) {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: ['chatbridge'] }),
+    queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeDeveloperApps }),
     classId ? queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeClassApps(classId) }) : Promise.resolve(),
     classId
       ? queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeClassAllowlist(classId) })
@@ -279,6 +289,24 @@ export function useChatBridgeApps() {
   return useQuery({
     queryKey: ChatBridgeQueryKeys.ChatBridgeApps,
     queryFn: fetchChatBridgeApps,
+    staleTime: 30_000,
+  })
+}
+
+export async function fetchDeveloperChatBridgeApps(): Promise<ChatBridgeAppDefinition[]> {
+  try {
+    const response = await fetchJson<RegistryApiResponse>('/api/developer/apps')
+    return normalizeRegistryEntries(response.apps)
+  } catch (error) {
+    console.warn('Falling back to empty developer ChatBridge apps', error)
+    return []
+  }
+}
+
+export function useDeveloperChatBridgeApps() {
+  return useQuery({
+    queryKey: ChatBridgeQueryKeys.ChatBridgeDeveloperApps,
+    queryFn: fetchDeveloperChatBridgeApps,
     staleTime: 30_000,
   })
 }

@@ -4,8 +4,13 @@ create table if not exists apps (
   registered_at bigint not null,
   reviewed_at bigint,
   review_notes text,
+  owner_user_id text,
+  owner_email text,
   manifest jsonb not null
 );
+
+alter table apps add column if not exists owner_user_id text;
+alter table apps add column if not exists owner_email text;
 
 create table if not exists review_actions (
   id text primary key,

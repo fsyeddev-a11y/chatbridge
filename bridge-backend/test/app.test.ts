@@ -251,6 +251,51 @@ describe('bridge-backend app', () => {
     assert.equal(response.statusCode, 201)
     assert.equal(response.json().app.reviewState, 'pending')
     assert.equal(response.json().app.manifest.appId, 'story-builder')
+    assert.equal(response.json().app.ownerUserId, 'user-1')
+    assert.equal(response.json().app.ownerEmail, 'tester@example.com')
+  })
+
+  it('returns only developer-owned apps from the developer apps endpoint', async () => {
+    const store = createInMemoryBridgeStore()
+    await store.registerApp(
+      {
+        appId: 'story-builder',
+        name: 'AI Story Builder',
+        version: '1.0.0',
+        description: 'Structured story building for students.',
+        developerName: 'Developer',
+        executionModel: 'iframe',
+        allowedOrigins: ['https://apps.example.com'],
+        authType: 'none',
+        subjectTags: ['ELA'],
+        llmSafeFields: ['chapterTitle'],
+        tools: [
+          {
+            name: 'chatbridge_story_builder_open',
+            description: 'Open the story builder.',
+          },
+        ],
+      },
+      {
+        userId: 'user-1',
+        email: 'tester@example.com',
+      }
+    )
+
+    const app = createApp({ store, authVerifier: allowAllAuth, chatClient: fakeChatClient })
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/developer/apps',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(
+      response.json().apps.map((entry: { manifest: { appId: string } }) => entry.manifest.appId),
+      ['story-builder']
+    )
   })
 
   it('selects the configured store driver safely', () => {

@@ -103,6 +103,9 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
 
     request.headers['x-chatbridge-user-id'] = user.id
+    if (user.email) {
+      request.headers['x-chatbridge-user-email'] = user.email
+    }
   })
 
   app.setErrorHandler(async (error, request, reply) => {
@@ -145,6 +148,19 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
   })
 
+  app.get('/api/developer/apps', async (request, reply) => {
+    const userId = request.headers['x-chatbridge-user-id']
+    if (typeof userId !== 'string') {
+      return reply.status(401).send({
+        error: 'unauthorized',
+      })
+    }
+
+    return {
+      apps: await store.listRegistryEntriesForOwner(userId),
+    }
+  })
+
   app.get('/api/registry/apps/:appId', async (request, reply) => {
     const { appId } = AppIdParamsSchema.parse(request.params)
     const appEntry = await store.getRegistryEntry(appId)
@@ -172,7 +188,17 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
 
     const manifest = AppManifestSchema.parse(request.body)
-    const appEntry = await store.registerApp(manifest)
+    const userId = request.headers['x-chatbridge-user-id']
+    const userEmail = request.headers['x-chatbridge-user-email']
+    const appEntry = await store.registerApp(
+      manifest,
+      typeof userId === 'string'
+        ? {
+            userId,
+            email: typeof userEmail === 'string' ? userEmail : undefined,
+          }
+        : undefined
+    )
     return reply.status(201).send({
       app: appEntry,
     })
