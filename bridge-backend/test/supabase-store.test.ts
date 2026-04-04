@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  buildAppContextSnapshotRows,
   getMissingSeedAllowlistEntries,
   getMissingSeedRegistryEntries,
 } from '../src/supabase-store.js'
@@ -112,5 +113,61 @@ describe('supabase seed bootstrap helpers', () => {
       missing.map((entry) => entry.appId).sort(),
       ['chess', 'google-classroom']
     )
+  })
+
+  it('builds snapshot rows for each app context in a bridge session', () => {
+    const rows = buildAppContextSnapshotRows(
+      'session-1',
+      'user-1',
+      {
+        activeClassId: 'demo-class',
+        activeAppId: 'weather',
+        appContext: {
+          weather: {
+            appId: 'weather',
+            status: 'active',
+            summary: 'Austin is 82F and sunny.',
+            lastState: {
+              location: 'Austin',
+              temperatureF: 82,
+            },
+          },
+          chess: {
+            appId: 'chess',
+            status: 'complete',
+            summary: 'Puzzle solved.',
+            lastError: 'Recovered from disconnect.',
+          },
+        },
+      },
+      123456
+    )
+
+    assert.equal(rows.length, 2)
+    assert.deepEqual(rows.find((row) => row.app_id === 'weather'), {
+      id: 'session-1:user-1:weather:123456',
+      session_id: 'session-1',
+      user_id: 'user-1',
+      app_id: 'weather',
+      status: 'active',
+      summary: 'Austin is 82F and sunny.',
+      last_state: {
+        location: 'Austin',
+        temperatureF: 82,
+      },
+      last_error: null,
+      captured_at: 123456,
+    })
+    assert.deepEqual(rows.find((row) => row.app_id === 'chess'), {
+      id: 'session-1:user-1:chess:123456',
+      session_id: 'session-1',
+      user_id: 'user-1',
+      app_id: 'chess',
+      status: 'complete',
+      summary: 'Puzzle solved.',
+      last_state: null,
+      last_error: 'Recovered from disconnect.',
+      captured_at: 123456,
+    })
   })
 })

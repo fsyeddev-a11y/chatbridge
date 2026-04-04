@@ -62,6 +62,18 @@ type SupabaseBridgeSessionRow = {
   updated_at: number
 }
 
+type SupabaseAppContextSnapshotRow = {
+  id: string
+  session_id: string
+  user_id: string
+  app_id: string
+  status: 'idle' | 'ready' | 'active' | 'error' | 'complete'
+  summary: string | null
+  last_state: Record<string, unknown> | null
+  last_error: string | null
+  captured_at: number
+}
+
 export function getSupabasePersistenceConfig() {
   return {
     url: process.env.SUPABASE_URL || '',
@@ -357,12 +369,13 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 
     async upsertBridgeSessionState(sessionId, userId, bridgeState) {
       await ensureSeeded()
+      const updatedAt = Date.now()
       const row: SupabaseBridgeSessionRow = {
         id: `${sessionId}:${userId}`,
         session_id: sessionId,
         user_id: userId,
         bridge_state: bridgeState,
-        updated_at: Date.now(),
+        updated_at: updatedAt,
       }
 
       const { data, error } = await client
@@ -373,6 +386,14 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 
       if (error) {
         throw error
+      }
+
+      const snapshotRows = buildAppContextSnapshotRows(sessionId, userId, bridgeState, updatedAt)
+      if (snapshotRows.length) {
+        const { error: snapshotError } = await client.from('app_context_snapshots').insert(snapshotRows)
+        if (snapshotError) {
+          throw snapshotError
+        }
       }
 
       return mapBridgeSessionRow(data)
@@ -551,6 +572,25 @@ function mapBridgeSessionRow(row: SupabaseBridgeSessionRow): BridgeSessionRecord
     bridgeState: row.bridge_state,
     updatedAt: row.updated_at,
   }
+}
+
+export function buildAppContextSnapshotRows(
+  sessionId: string,
+  userId: string,
+  bridgeState: SessionBridgeState,
+  capturedAt: number
+): SupabaseAppContextSnapshotRow[] {
+  return Object.values(bridgeState.appContext).map((context) => ({
+    id: `${sessionId}:${userId}:${context.appId}:${capturedAt}`,
+    session_id: sessionId,
+    user_id: userId,
+    app_id: context.appId,
+    status: context.status,
+    summary: context.summary ?? null,
+    last_state: context.lastState ?? null,
+    last_error: context.lastError ?? null,
+    captured_at: capturedAt,
+  }))
 }
 
 function createSupabaseSeedData() {

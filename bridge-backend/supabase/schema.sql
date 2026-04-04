@@ -58,3 +58,20 @@ create table if not exists bridge_sessions (
 
 create index if not exists bridge_sessions_session_id_idx on bridge_sessions(session_id);
 create index if not exists bridge_sessions_user_id_idx on bridge_sessions(user_id);
+
+create table if not exists app_context_snapshots (
+  id text primary key,
+  session_id text not null,
+  user_id text not null,
+  app_id text not null references apps(app_id) on delete cascade,
+  status text not null check (status in ('idle', 'ready', 'active', 'error', 'complete')),
+  summary text,
+  last_state jsonb,
+  last_error text,
+  captured_at bigint not null
+);
+
+create index if not exists app_context_snapshots_session_id_idx on app_context_snapshots(session_id);
+create index if not exists app_context_snapshots_user_id_idx on app_context_snapshots(user_id);
+create index if not exists app_context_snapshots_app_id_idx on app_context_snapshots(app_id);
+create index if not exists app_context_snapshots_captured_at_idx on app_context_snapshots(captured_at);
