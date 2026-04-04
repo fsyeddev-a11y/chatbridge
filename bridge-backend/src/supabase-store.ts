@@ -7,6 +7,7 @@ import type {
   AuditEvent,
   BridgeSessionRecord,
   ClassAppAllowlist,
+  OAuthTokenRecord,
   ReviewAction,
   SessionBridgeState,
 } from './types.js'
@@ -89,6 +90,19 @@ type SupabaseAppContextSnapshotRow = {
   last_state: Record<string, unknown> | null
   last_error: string | null
   captured_at: number
+}
+
+type SupabaseOAuthTokenRow = {
+  id: string
+  user_id: string
+  app_id: string
+  provider: OAuthTokenRecord['provider']
+  access_token: string
+  refresh_token: string | null
+  expires_at: number | null
+  scopes: string[]
+  created_at: number
+  last_refreshed_at: number | null
 }
 
 type RegistryComposition = {
@@ -524,6 +538,60 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 
       return mapBridgeSessionRow(data)
     },
+    async getOAuthToken(userId, appId, provider) {
+      await ensureSeeded()
+      const { data, error } = await client
+        .from('oauth_tokens')
+        .select('id, user_id, app_id, provider, access_token, refresh_token, expires_at, scopes, created_at, last_refreshed_at')
+        .eq('id', buildOAuthTokenRowId(userId, appId, provider))
+        .maybeSingle<SupabaseOAuthTokenRow>()
+
+      if (error) {
+        throw error
+      }
+
+      return data ? mapOAuthTokenRow(data) : undefined
+    },
+    async upsertOAuthToken(record) {
+      await ensureSeeded()
+      const row: SupabaseOAuthTokenRow = {
+        id: buildOAuthTokenRowId(record.userId, record.appId, record.provider),
+        user_id: record.userId,
+        app_id: record.appId,
+        provider: record.provider,
+        access_token: record.accessToken,
+        refresh_token: record.refreshToken ?? null,
+        expires_at: record.expiresAt ?? null,
+        scopes: record.scopes,
+        created_at: record.createdAt,
+        last_refreshed_at: record.lastRefreshedAt ?? null,
+      }
+
+      const { data, error } = await client
+        .from('oauth_tokens')
+        .upsert(row, { onConflict: 'user_id,app_id,provider' })
+        .select('id, user_id, app_id, provider, access_token, refresh_token, expires_at, scopes, created_at, last_refreshed_at')
+        .single<SupabaseOAuthTokenRow>()
+
+      if (error) {
+        throw error
+      }
+
+      return mapOAuthTokenRow(data)
+    },
+    async deleteOAuthToken(userId, appId, provider) {
+      await ensureSeeded()
+      const { error, count } = await client
+        .from('oauth_tokens')
+        .delete({ count: 'exact' })
+        .eq('id', buildOAuthTokenRowId(userId, appId, provider))
+
+      if (error) {
+        throw error
+      }
+
+      return Boolean(count)
+    },
   }
 }
 
@@ -844,6 +912,20 @@ function mapBridgeSessionRow(row: SupabaseBridgeSessionRow): BridgeSessionRecord
   }
 }
 
+function mapOAuthTokenRow(row: SupabaseOAuthTokenRow): OAuthTokenRecord {
+  return {
+    userId: row.user_id,
+    appId: row.app_id,
+    provider: row.provider,
+    accessToken: row.access_token,
+    refreshToken: row.refresh_token ?? undefined,
+    expiresAt: row.expires_at ?? undefined,
+    scopes: row.scopes || [],
+    createdAt: row.created_at,
+    lastRefreshedAt: row.last_refreshed_at ?? undefined,
+  }
+}
+
 export function buildAppContextSnapshotRows(
   sessionId: string,
   userId: string,
@@ -922,6 +1004,11 @@ function createSupabaseSeedData(): SupabaseSeedData {
       executionModel: 'iframe',
       allowedOrigins: ['https://apps.chatbridge.local'],
       authType: 'oauth2',
+      oauthProvider: 'google',
+      oauthScopes: [
+        'https://www.googleapis.com/auth/classroom.courses.readonly',
+        'https://www.googleapis.com/auth/classroom.coursework.me.readonly',
+      ],
       subjectTags: ['Productivity', 'Classroom'],
       gradeBand: '3-12',
       llmSafeFields: ['courseCount', 'upcomingAssignments'],
@@ -993,6 +1080,10 @@ function migrateManifest(manifest: AppManifest): AppManifest {
 
 function buildVersionRecordId(appId: string, version: string) {
   return `${appId}:${version}`
+}
+
+function buildOAuthTokenRowId(userId: string, appId: string, provider: OAuthTokenRecord['provider']) {
+  return `${userId}:${appId}:${provider}`
 }
 
 function mapReviewStateToAction(reviewState: AppRegistryEntry['reviewState']): ReviewAction['action'] {

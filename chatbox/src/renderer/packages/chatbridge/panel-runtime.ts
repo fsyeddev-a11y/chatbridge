@@ -16,7 +16,7 @@ export type HostBridgeEnvelope = {
   source: 'chatbridge-host'
   version: '1.0'
   appId: string
-  type: 'INIT' | 'PING' | 'TERMINATE'
+  type: 'INIT' | 'PING' | 'TERMINATE' | 'AUTH_RESULT'
   payload?: {
     sessionId?: string
     classId?: string
@@ -24,6 +24,9 @@ export type HostBridgeEnvelope = {
     theme?: 'light' | 'dark'
     previousState?: Record<string, unknown>
     reason?: string
+    success?: boolean
+    provider?: string
+    error?: string
   }
 }
 

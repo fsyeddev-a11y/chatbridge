@@ -1,5 +1,19 @@
 # Epic 3: OAuth Orchestration
 
+## Status
+
+- Implemented now:
+  - provider-aware OAuth manifest fields
+  - backend-owned OAuth start, callback, status, and revoke endpoints
+  - server-side token storage
+  - signed OAuth state handling
+  - frontend connect/disconnect UX for OAuth apps
+- Not implemented yet:
+  - provider-backed token refresh before protected tool execution
+  - real Google Classroom API access using stored tokens
+  - broader provider support beyond Google
+  - role-specific connection management UX outside the session runtime
+
 ## Context
 
 Some third-party apps (e.g., Google Classroom Assistant) need authenticated access to external services. The core design principle is that the platform owns the entire OAuth lifecycle — the iframe never sees tokens. Today, the toolset marks `authType: 'oauth2'` apps and sets `requiresAuthorization: true` in tool results, but no actual OAuth flow exists.

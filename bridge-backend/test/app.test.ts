@@ -5,6 +5,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { createApp, getConfiguredAllowedOrigins } from '../src/app.js'
 import type { ChatCompletionClient, ChatCompletionStreamClient } from '../src/chat.js'
+import type { OAuthService } from '../src/oauth.js'
 import { createInMemoryFixedWindowRateLimiter } from '../src/rate-limit.js'
 import {
   createConfiguredBridgeStore,
@@ -24,6 +25,43 @@ describe('bridge-backend app', () => {
     content: 'Bridge-backed answer',
     model: 'gpt-4o-mini',
   })
+  const fakeOAuthService: OAuthService = {
+    getProviderConfig: () => ({
+      provider: 'google',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      authEndpoint: 'https://accounts.example.com/o/oauth2/auth',
+      tokenEndpoint: 'https://accounts.example.com/o/oauth2/token',
+      revokeEndpoint: 'https://accounts.example.com/o/oauth2/revoke',
+      supportedScopes: [
+        'https://www.googleapis.com/auth/classroom.courses.readonly',
+        'https://www.googleapis.com/auth/classroom.coursework.me.readonly',
+      ],
+    }),
+    createAuthorizationRequest: ({ app, sessionId, userId, returnOrigin }) => ({
+      provider: 'google',
+      authUrl: `https://accounts.example.com/authorize?appId=${app.appId}&sessionId=${sessionId || ''}&userId=${userId}&origin=${encodeURIComponent(returnOrigin)}`,
+    }),
+    handleCallback: async () => ({
+      appId: 'google-classroom',
+      provider: 'google',
+      userId: 'user-1',
+      sessionId: 'session-1',
+      returnOrigin: 'http://localhost:3000',
+      record: {
+        userId: 'user-1',
+        appId: 'google-classroom',
+        provider: 'google',
+        accessToken: 'encrypted-access',
+        refreshToken: 'encrypted-refresh',
+        expiresAt: Date.now() + 60_000,
+        scopes: ['https://www.googleapis.com/auth/classroom.courses.readonly'],
+        createdAt: Date.now(),
+        lastRefreshedAt: Date.now(),
+      },
+    }),
+    revokeToken: async () => {},
+  }
 
   it('returns health status', async () => {
     const app = createApp({ store: createInMemoryBridgeStore() })
@@ -532,6 +570,94 @@ describe('bridge-backend app', () => {
         },
       ]
     )
+  })
+
+  it('starts an oauth flow for oauth2 apps and returns a popup url', async () => {
+    const app = createApp({
+      store: createInMemoryBridgeStore(),
+      authVerifier: allowAllAuth,
+      chatClient: fakeChatClient,
+      oauthService: fakeOAuthService,
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/oauth/apps/google-classroom/start',
+      headers: {
+        authorization: 'Bearer token-1',
+        origin: 'http://localhost:3000',
+      },
+      payload: {
+        sessionId: 'session-1',
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().provider, 'google')
+    assert.match(response.json().authUrl, /accounts\.example\.com\/authorize/)
+  })
+
+  it('stores oauth tokens on callback and reports connected status', async () => {
+    const store = createInMemoryBridgeStore()
+    const app = createApp({
+      store,
+      authVerifier: allowAllAuth,
+      chatClient: fakeChatClient,
+      oauthService: fakeOAuthService,
+    })
+
+    const callbackResponse = await app.inject({
+      method: 'GET',
+      url: '/oauth/callback?code=oauth-code&state=signed-state',
+    })
+    assert.equal(callbackResponse.statusCode, 200)
+    assert.match(callbackResponse.body, /chatbridge-oauth/)
+
+    const statusResponse = await app.inject({
+      method: 'GET',
+      url: '/api/oauth/apps/google-classroom/status',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(statusResponse.statusCode, 200)
+    assert.equal(statusResponse.json().connected, true)
+    assert.equal(statusResponse.json().provider, 'google')
+  })
+
+  it('revokes oauth tokens for oauth2 apps', async () => {
+    const store = createInMemoryBridgeStore()
+    await store.upsertOAuthToken({
+      userId: 'user-1',
+      appId: 'google-classroom',
+      provider: 'google',
+      accessToken: 'encrypted-access',
+      refreshToken: 'encrypted-refresh',
+      expiresAt: Date.now() + 60_000,
+      scopes: ['https://www.googleapis.com/auth/classroom.courses.readonly'],
+      createdAt: Date.now(),
+      lastRefreshedAt: Date.now(),
+    })
+
+    const app = createApp({
+      store,
+      authVerifier: allowAllAuth,
+      chatClient: fakeChatClient,
+      oauthService: fakeOAuthService,
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/oauth/apps/google-classroom/revoke',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().revoked, true)
+    assert.equal(await store.getOAuthToken('user-1', 'google-classroom', 'google'), undefined)
   })
 
   it('selects the configured store driver safely', () => {

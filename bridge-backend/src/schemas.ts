@@ -29,6 +29,8 @@ export const AppManifestSchema = z.object({
   allowedOrigins: z.array(z.string().max(300)).min(1).max(10),
   heartbeatTimeoutMs: z.number().positive().optional(),
   authType: z.enum(['none', 'api-key', 'oauth2']),
+  oauthProvider: z.enum(['google']).optional(),
+  oauthScopes: z.array(z.string().min(1).max(200)).max(20).optional(),
   subjectTags: z.array(z.string().max(80)).max(20),
   gradeBand: z.string().max(40).optional(),
   llmSafeFields: z.array(z.string().max(100)).max(20),
@@ -38,6 +40,40 @@ export const AppManifestSchema = z.object({
       description: z.string().min(1).max(500),
     })
   ).max(20),
+}).superRefine((manifest, ctx) => {
+  if (manifest.authType === 'oauth2') {
+    if (!manifest.oauthProvider) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['oauthProvider'],
+        message: 'oauthProvider is required when authType is oauth2',
+      })
+    }
+    if (!manifest.oauthScopes?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['oauthScopes'],
+        message: 'oauthScopes is required when authType is oauth2',
+      })
+    }
+  }
+
+  if (manifest.authType !== 'oauth2') {
+    if (manifest.oauthProvider) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['oauthProvider'],
+        message: 'oauthProvider is only allowed when authType is oauth2',
+      })
+    }
+    if (manifest.oauthScopes?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['oauthScopes'],
+        message: 'oauthScopes is only allowed when authType is oauth2',
+      })
+    }
+  }
 })
 
 export const ReviewStateSchema = z.enum(['pending', 'approved', 'rejected', 'suspended'])
@@ -96,4 +132,8 @@ export const SessionIdParamsSchema = z.object({
 
 export const BridgeSessionUpsertBodySchema = z.object({
   bridgeState: SessionBridgeStateSchema,
+})
+
+export const OAuthStartBodySchema = z.object({
+  sessionId: z.string().min(1).max(120).optional(),
 })

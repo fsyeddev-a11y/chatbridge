@@ -32,6 +32,7 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [x] `11` Backend-owned app/session reconciliation
 - [x] `11` App-context snapshot persistence
 - [x] `12` Dedicated teacher/admin surfaces
+- [x] `03` OAuth connect/status/revoke foundation
 - [ ] `13` Additional real apps beyond Weather
 - [x] `14` Developer self-serve manifest submission and owned apps
 - [x] `14` Developer review feedback loop

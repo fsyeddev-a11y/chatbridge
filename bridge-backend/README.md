@@ -15,8 +15,8 @@ Planned next:
 - persistent registry store
 - platform approval mutations
 - teacher allowlist mutations
-- OAuth orchestration
 - app session persistence
+- provider-backed OAuth token refresh and API execution
 
 Default local file store path:
 - `bridge-backend/data/bridge-store.json`
@@ -34,3 +34,9 @@ Supabase schema:
 Deployment-related environment variables:
 - `CHATBRIDGE_ALLOWED_ORIGINS=https://chatbox.example.com,https://weather.example.com`
 - `CHATBRIDGE_WEATHER_APP_URL=https://weather.example.com`
+- `CHATBRIDGE_PUBLIC_BACKEND_ORIGIN=https://chatbridge-backend.example.com`
+- `CHATBRIDGE_GOOGLE_OAUTH_CLIENT_ID=...`
+- `CHATBRIDGE_GOOGLE_OAUTH_CLIENT_SECRET=...`
+- `CHATBRIDGE_GOOGLE_OAUTH_SUPPORTED_SCOPES=https://www.googleapis.com/auth/classroom.courses.readonly,https://www.googleapis.com/auth/classroom.coursework.me.readonly`
+- `CHATBRIDGE_OAUTH_STATE_SECRET=...`
+- `CHATBRIDGE_OAUTH_TOKEN_SECRET=...`

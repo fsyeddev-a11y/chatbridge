@@ -268,6 +268,8 @@ export const BridgeAppManifestSchema = z.object({
   allowedOrigins: z.array(z.string()).default([]),
   heartbeatTimeoutMs: z.number().positive().optional(),
   authType: BridgeAppAuthTypeSchema,
+  oauthProvider: z.enum(['google']).optional(),
+  oauthScopes: z.array(z.string()).default([]),
   subjectTags: z.array(z.string()).default([]),
   gradeBand: z.string().optional(),
   llmSafeFields: z.array(z.string()).default([]),

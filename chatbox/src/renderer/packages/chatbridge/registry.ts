@@ -149,6 +149,11 @@ const fallbackRegistry: ChatBridgeAppDefinition[] = [
     executionModel: 'iframe',
     allowedOrigins: ['null'],
     authType: 'oauth2',
+    oauthProvider: 'google',
+    oauthScopes: [
+      'https://www.googleapis.com/auth/classroom.courses.readonly',
+      'https://www.googleapis.com/auth/classroom.coursework.me.readonly',
+    ],
     subjectTags: ['Productivity', 'Classroom'],
     gradeBand: '3-12',
     llmSafeFields: ['courseCount', 'upcomingAssignments'],

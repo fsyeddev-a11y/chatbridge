@@ -36,6 +36,7 @@ function nextBridgeState(input: {
   bridgeState?: SessionBridgeState
   classId: string
   toolName: string
+  isAuthorized: boolean
 }): SessionBridgeState {
   const previousState = input.bridgeState || {
     activeClassId: input.classId,
@@ -51,12 +52,12 @@ function nextBridgeState(input: {
       ...previousState.appContext,
       [input.app.manifest.appId]: {
         appId: input.app.manifest.appId,
-        status: input.app.manifest.authType === 'oauth2' ? 'idle' : 'active',
+        status: input.app.manifest.authType === 'oauth2' && !input.isAuthorized ? 'idle' : 'active',
         summary: buildToolSummary(input.app, existingContext),
         lastState: {
           ...(existingContext?.lastState || {}),
           invokedTool: input.toolName,
-          requiresAuthorization: input.app.manifest.authType === 'oauth2',
+          requiresAuthorization: input.app.manifest.authType === 'oauth2' && !input.isAuthorized,
         },
         lastEventAt: Date.now(),
         lastError: undefined,
@@ -70,6 +71,7 @@ function buildToolResult(input: {
   classId: string
   toolName: string
   bridgeState: SessionBridgeState
+  isAuthorized: boolean
 }): BackendChatToolResult {
   const existingContext = input.bridgeState.appContext[input.app.manifest.appId]
   const summary = buildToolSummary(input.app, existingContext)
@@ -80,7 +82,7 @@ function buildToolResult(input: {
     toolName: input.toolName,
     status: 'opened',
     authType: input.app.manifest.authType,
-    requiresAuthorization: input.app.manifest.authType === 'oauth2',
+    requiresAuthorization: input.app.manifest.authType === 'oauth2' && !input.isAuthorized,
     summary,
     activeClassId: input.classId,
   }
@@ -137,11 +139,17 @@ export async function createChatBridgeToolDefinitions(input: {
           }
         }
 
+        const isAuthorized =
+          app.manifest.authType === 'oauth2' && app.manifest.oauthProvider
+            ? Boolean(await input.store.getOAuthToken(input.userId!, app.manifest.appId, app.manifest.oauthProvider))
+            : true
+
         const updatedBridgeState = nextBridgeState({
           app,
           bridgeState: input.bridgeState,
           classId: input.classId!,
           toolName: tool.name,
+          isAuthorized,
         })
         const record = await input.store.upsertBridgeSessionState(input.sessionId!, input.userId!, updatedBridgeState)
         const result = buildToolResult({
@@ -149,6 +157,7 @@ export async function createChatBridgeToolDefinitions(input: {
           classId: input.classId!,
           toolName: tool.name,
           bridgeState: record.bridgeState,
+          isAuthorized,
         })
 
         await input.store.appendAuditEvent({

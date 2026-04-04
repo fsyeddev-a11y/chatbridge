@@ -98,3 +98,18 @@ create index if not exists app_context_snapshots_session_id_idx on app_context_s
 create index if not exists app_context_snapshots_user_id_idx on app_context_snapshots(user_id);
 create index if not exists app_context_snapshots_app_id_idx on app_context_snapshots(app_id);
 create index if not exists app_context_snapshots_captured_at_idx on app_context_snapshots(captured_at);
+
+create table if not exists oauth_tokens (
+  id text primary key,
+  user_id text not null,
+  app_id text not null references apps(app_id) on delete cascade,
+  provider text not null,
+  access_token text not null,
+  refresh_token text,
+  expires_at bigint,
+  scopes jsonb not null default '[]'::jsonb,
+  created_at bigint not null,
+  last_refreshed_at bigint
+);
+
+create unique index if not exists oauth_tokens_user_app_provider_idx on oauth_tokens(user_id, app_id, provider);

@@ -3,6 +3,12 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { ZodError } from 'zod'
 import { createSupabaseAuthVerifier, getBearerToken, type AuthVerifier } from './auth.js'
 import {
+  buildOAuthPopupResultHtml,
+  createConfiguredOAuthService,
+  decryptStoredOAuthToken,
+  type OAuthService,
+} from './oauth.js'
+import {
   createOpenAIChatClient,
   createOpenAIChatStreamClient,
   type ChatCompletionClient,
@@ -29,6 +35,7 @@ import {
   ClassAllowlistBodySchema,
   ClassAllowlistToggleBodySchema,
   ClassIdParamsSchema,
+  OAuthStartBodySchema,
   ReviewActionBodySchema,
   SessionIdParamsSchema,
 } from './schemas.js'
@@ -44,6 +51,7 @@ export type AppOptions = {
   chatRateLimiterSet?: ChatRateLimiterSet
   mutationRateLimiterSet?: MutationRateLimiterSet
   toolRateLimiterSet?: ToolRateLimiterSet
+  oauthService?: OAuthService
 }
 
 const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://localhost:4173']
@@ -77,6 +85,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   }
   const mutationRateLimiterSet = options.mutationRateLimiterSet ?? createConfiguredMutationRateLimiterSet()
   const toolRateLimiterSet = options.toolRateLimiterSet ?? createConfiguredToolRateLimiterSet()
+  const oauthService = options.oauthService ?? createConfiguredOAuthService()
 
   async function prepareChatInvocation(body: {
     sessionId?: string
@@ -285,6 +294,138 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
   })
 
+  app.get('/api/oauth/apps/:appId/status', async (request, reply) => {
+    const { appId } = AppIdParamsSchema.parse(request.params)
+    const userId = request.headers['x-chatbridge-user-id']
+    if (typeof userId !== 'string') {
+      return reply.status(401).send({ error: 'unauthorized' })
+    }
+
+    const appEntry = await store.getRegistryEntry(appId)
+    if (!appEntry) {
+      return reply.status(404).send({ error: 'app_not_found' })
+    }
+    if (appEntry.manifest.authType !== 'oauth2' || !appEntry.manifest.oauthProvider) {
+      return reply.status(400).send({ error: 'oauth_not_supported' })
+    }
+
+    const token = await store.getOAuthToken(userId, appId, appEntry.manifest.oauthProvider)
+    const connected = Boolean(token && (!token.expiresAt || token.expiresAt > Date.now()))
+
+    return {
+      appId,
+      provider: appEntry.manifest.oauthProvider,
+      connected,
+      expiresAt: token?.expiresAt,
+      scopes: token?.scopes || [],
+    }
+  })
+
+  app.post('/api/oauth/apps/:appId/start', async (request, reply) => {
+    const { appId } = AppIdParamsSchema.parse(request.params)
+    const { sessionId } = OAuthStartBodySchema.parse(request.body)
+    const userId = request.headers['x-chatbridge-user-id']
+    if (typeof userId !== 'string') {
+      return reply.status(401).send({ error: 'unauthorized' })
+    }
+
+    const appEntry = await store.getRegistryEntry(appId)
+    if (!appEntry) {
+      return reply.status(404).send({ error: 'app_not_found' })
+    }
+    if (appEntry.manifest.authType !== 'oauth2') {
+      return reply.status(400).send({ error: 'oauth_not_supported' })
+    }
+
+    const origin = typeof request.headers.origin === 'string' ? request.headers.origin : undefined
+    if (!origin || !allowedOrigins.has(origin)) {
+      return reply.status(400).send({ error: 'invalid_return_origin' })
+    }
+
+    try {
+      const result = oauthService.createAuthorizationRequest({
+        app: appEntry.manifest,
+        userId,
+        sessionId,
+        returnOrigin: origin,
+      })
+
+      await store.appendAuditEvent({
+        timestamp: Date.now(),
+        traceId: `oauth-start-${randomUUID()}`,
+        eventType: 'OAuthAuthorizationStarted',
+        source: 'bridge-backend',
+        sessionId,
+        appId,
+        appVersion: appEntry.manifest.version,
+        summary: `Started OAuth flow for ${appEntry.manifest.name}.`,
+        metadata: {
+          provider: result.provider,
+        },
+      })
+
+      return {
+        appId,
+        provider: result.provider,
+        authUrl: result.authUrl,
+      }
+    } catch (error) {
+      return reply.status(400).send({
+        error: 'oauth_configuration_error',
+        message: error instanceof Error ? error.message : 'OAuth configuration failed.',
+      })
+    }
+  })
+
+  app.post('/api/oauth/apps/:appId/revoke', async (request, reply) => {
+    const { appId } = AppIdParamsSchema.parse(request.params)
+    const userId = request.headers['x-chatbridge-user-id']
+    if (typeof userId !== 'string') {
+      return reply.status(401).send({ error: 'unauthorized' })
+    }
+
+    const appEntry = await store.getRegistryEntry(appId)
+    if (!appEntry) {
+      return reply.status(404).send({ error: 'app_not_found' })
+    }
+    if (appEntry.manifest.authType !== 'oauth2' || !appEntry.manifest.oauthProvider) {
+      return reply.status(400).send({ error: 'oauth_not_supported' })
+    }
+
+    const token = await store.getOAuthToken(userId, appId, appEntry.manifest.oauthProvider)
+    if (token) {
+      try {
+        await oauthService.revokeToken({
+          provider: token.provider,
+          accessToken: decryptStoredOAuthToken(token.accessToken),
+        })
+      } catch {
+        // Best-effort provider revocation; the local delete is the durable control plane action.
+      }
+    }
+
+    const deleted = await store.deleteOAuthToken(userId, appId, appEntry.manifest.oauthProvider)
+    await store.appendAuditEvent({
+      timestamp: Date.now(),
+      traceId: `oauth-revoke-${randomUUID()}`,
+      eventType: 'OAuthAuthorizationRevoked',
+      source: 'bridge-backend',
+      appId,
+      appVersion: appEntry.manifest.version,
+      summary: `Revoked OAuth access for ${appEntry.manifest.name}.`,
+      metadata: {
+        provider: appEntry.manifest.oauthProvider,
+        deleted,
+      },
+    })
+
+    return {
+      appId,
+      provider: appEntry.manifest.oauthProvider,
+      revoked: deleted,
+    }
+  })
+
   app.get('/api/classes/:classId/apps', async (request) => {
     const { classId } = ClassIdParamsSchema.parse(request.params)
     return {
@@ -422,6 +563,62 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       bridgeState: record.bridgeState,
       updatedAt: record.updatedAt,
     })
+  })
+
+  app.get('/oauth/callback', async (request, reply) => {
+    const query = request.query as { code?: string; state?: string; error?: string }
+
+    if (query.error || !query.code || !query.state) {
+      const html = buildOAuthPopupResultHtml({
+        success: false,
+        appId: 'unknown',
+        provider: 'google',
+        targetOrigin: getConfiguredAllowedOrigins()[0] || 'http://localhost:3000',
+        error: query.error || 'missing_code_or_state',
+      })
+      return reply.type('text/html').send(html)
+    }
+
+    try {
+      const result = await oauthService.handleCallback({
+        code: query.code,
+        state: query.state,
+      })
+
+      await store.upsertOAuthToken(result.record)
+      await store.appendAuditEvent({
+        timestamp: Date.now(),
+        traceId: `oauth-callback-${randomUUID()}`,
+        eventType: 'OAuthAuthorizationCompleted',
+        source: 'bridge-backend',
+        sessionId: result.sessionId,
+        appId: result.appId,
+        summary: `OAuth authorization completed for ${result.appId}.`,
+        metadata: {
+          provider: result.provider,
+        },
+      })
+
+      return reply.type('text/html').send(
+        buildOAuthPopupResultHtml({
+          success: true,
+          appId: result.appId,
+          provider: result.provider,
+          targetOrigin: result.returnOrigin,
+          sessionId: result.sessionId,
+        })
+      )
+    } catch (error) {
+      return reply.type('text/html').send(
+        buildOAuthPopupResultHtml({
+          success: false,
+          appId: 'unknown',
+          provider: 'google',
+          targetOrigin: getConfiguredAllowedOrigins()[0] || 'http://localhost:3000',
+          error: error instanceof Error ? error.message : 'oauth_callback_failed',
+        })
+      )
+    }
   })
 
   app.post('/api/chat/stream', async (request, reply) => {

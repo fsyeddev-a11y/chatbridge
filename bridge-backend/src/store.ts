@@ -7,6 +7,7 @@ import type {
   AuditEvent,
   BridgeSessionRecord,
   ClassAppAllowlist,
+  OAuthTokenRecord,
   ReviewAction,
   SessionBridgeState,
 } from './types.js'
@@ -42,6 +43,9 @@ export type BridgeStore = {
   listReviewActionsForOwner(userId: string): Awaitable<ReviewAction[]>
   getBridgeSessionState(sessionId: string, userId: string): Awaitable<SessionBridgeState | undefined>
   upsertBridgeSessionState(sessionId: string, userId: string, bridgeState: SessionBridgeState): Awaitable<BridgeSessionRecord>
+  getOAuthToken(userId: string, appId: string, provider: OAuthTokenRecord['provider']): Awaitable<OAuthTokenRecord | undefined>
+  upsertOAuthToken(record: OAuthTokenRecord): Awaitable<OAuthTokenRecord>
+  deleteOAuthToken(userId: string, appId: string, provider: OAuthTokenRecord['provider']): Awaitable<boolean>
 }
 
 export type BridgeStoreData = {
@@ -51,6 +55,7 @@ export type BridgeStoreData = {
   auditEvents: AuditEvent[]
   reviewActions: ReviewAction[]
   bridgeSessions: BridgeSessionRecord[]
+  oauthTokens: OAuthTokenRecord[]
 }
 
 export type BridgeStoreDriver = 'file' | 'supabase'
@@ -174,6 +179,11 @@ function createSeedData(): BridgeStoreData {
       executionModel: 'iframe',
       allowedOrigins: ['https://apps.chatbridge.local'],
       authType: 'oauth2',
+      oauthProvider: 'google',
+      oauthScopes: [
+        'https://www.googleapis.com/auth/classroom.courses.readonly',
+        'https://www.googleapis.com/auth/classroom.coursework.me.readonly',
+      ],
       subjectTags: ['Productivity', 'Classroom'],
       gradeBand: '3-12',
       llmSafeFields: ['courseCount', 'upcomingAssignments'],
@@ -219,11 +229,12 @@ function createSeedData(): BridgeStoreData {
     auditEvents: [],
     reviewActions: [],
     bridgeSessions: [],
+    oauthTokens: [],
   }
 }
 
 function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: BridgeStoreData) => void): BridgeStore {
-  const { registryEntries, appVersions, classAllowlist, auditEvents, reviewActions, bridgeSessions } = data
+  const { registryEntries, appVersions, classAllowlist, auditEvents, reviewActions, bridgeSessions, oauthTokens } = data
 
   function persist() {
     onWrite?.({
@@ -233,6 +244,7 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
       auditEvents,
       reviewActions,
       bridgeSessions,
+      oauthTokens,
     })
   }
 
@@ -452,6 +464,32 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
       persist()
       return nextRecord
     },
+    getOAuthToken(userId, appId, provider) {
+      return oauthTokens.find((record) => record.userId === userId && record.appId === appId && record.provider === provider)
+    },
+    upsertOAuthToken(record) {
+      const existingIndex = oauthTokens.findIndex(
+        (entry) => entry.userId === record.userId && entry.appId === record.appId && entry.provider === record.provider
+      )
+      if (existingIndex >= 0) {
+        oauthTokens[existingIndex] = record
+      } else {
+        oauthTokens.push(record)
+      }
+      persist()
+      return record
+    },
+    deleteOAuthToken(userId, appId, provider) {
+      const existingIndex = oauthTokens.findIndex(
+        (entry) => entry.userId === userId && entry.appId === appId && entry.provider === provider
+      )
+      if (existingIndex === -1) {
+        return false
+      }
+      oauthTokens.splice(existingIndex, 1)
+      persist()
+      return true
+    },
   }
 }
 
@@ -501,6 +539,7 @@ function readStoreFile(filePath: string): BridgeStoreData {
     auditEvents: parsed.auditEvents || [],
     reviewActions: parsed.reviewActions || [],
     bridgeSessions: parsed.bridgeSessions || [],
+    oauthTokens: parsed.oauthTokens || [],
   })
 }
 

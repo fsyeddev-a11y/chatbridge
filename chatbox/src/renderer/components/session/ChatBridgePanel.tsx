@@ -2,6 +2,7 @@ import { Alert, Badge, Button, Card, Group, Stack, Text } from '@mantine/core'
 import type { Session } from '@shared/types'
 import { IconAlertCircle, IconCheck, IconPlayerPause } from '@tabler/icons-react'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { revokeChatBridgeOAuthToken, startChatBridgeOAuthFlow, useChatBridgeOAuthStatus } from '@/packages/chatbridge/oauth'
 import { emitChatBridgeEvent } from '@/packages/chatbridge/observability'
 import {
   getBridgeFailureMessage,
@@ -33,6 +34,7 @@ export default function ChatBridgePanel({ session }: ChatBridgePanelProps) {
     [apps, bridgeState.activeAppId]
   )
   const activeContext = activeApp ? bridgeState.appContext[activeApp.appId] : undefined
+  const { data: oauthStatus } = useChatBridgeOAuthStatus(activeApp?.appId, activeApp?.authType === 'oauth2')
   const traceId = `chatbridge-panel-${session.id}`
 
   latestRuntimeStatusRef.current = activeContext?.status
@@ -303,6 +305,71 @@ export default function ChatBridgePanel({ session }: ChatBridgePanelProps) {
                 </Button>
               </Group>
             </Stack>
+          </Alert>
+        ) : null}
+
+        {activeApp.authType === 'oauth2' && !oauthStatus?.connected ? (
+          <Alert radius="md" icon={<IconPlayerPause size={16} />} color="yellow" variant="light">
+            <Group justify="space-between" align="center">
+              <Text size="sm">{activeApp.name} needs authorization before protected data can be used.</Text>
+              <Button
+                size="xs"
+                onClick={() =>
+                  void startChatBridgeOAuthFlow(activeApp.appId, session.id)
+                    .then(() => {
+                      postHostBridgeMessage(iframeRef.current, activeApp, 'AUTH_RESULT', {
+                        success: true,
+                        provider: activeApp.oauthProvider,
+                      })
+
+                      return updateBridgeAppContext(session.id, activeApp.appId, {
+                        status: 'ready',
+                        summary: `${activeApp.name} is connected and ready to use.`,
+                        lastError: undefined,
+                      })
+                    })
+                    .catch((error) => {
+                      console.warn('Failed to start ChatBridge OAuth flow', error)
+                    })
+                }
+              >
+                Connect
+              </Button>
+            </Group>
+          </Alert>
+        ) : null}
+
+        {activeApp.authType === 'oauth2' && oauthStatus?.connected ? (
+          <Alert radius="md" icon={<IconCheck size={16} />} color="green" variant="light">
+            <Group justify="space-between" align="center">
+              <Text size="sm">{activeApp.name} is connected.</Text>
+              <Button
+                size="xs"
+                variant="subtle"
+                color="gray"
+                onClick={() =>
+                  void revokeChatBridgeOAuthToken(activeApp.appId)
+                    .then(() => {
+                      postHostBridgeMessage(iframeRef.current, activeApp, 'AUTH_RESULT', {
+                        success: false,
+                        provider: activeApp.oauthProvider,
+                        error: 'revoked',
+                      })
+
+                      return updateBridgeAppContext(session.id, activeApp.appId, {
+                        status: 'idle',
+                        summary: `${activeApp.name} was disconnected.`,
+                        lastError: undefined,
+                      })
+                    })
+                    .catch((error) => {
+                      console.warn('Failed to revoke ChatBridge OAuth token', error)
+                    })
+                }
+              >
+                Disconnect
+              </Button>
+            </Group>
           </Alert>
         ) : null}
 

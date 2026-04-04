@@ -1,6 +1,7 @@
 export type ReviewState = 'pending' | 'approved' | 'rejected' | 'suspended'
 
 export type RuntimeAuthType = 'none' | 'api-key' | 'oauth2'
+export type OAuthProvider = 'google'
 
 export type ToolManifest = {
   name: string
@@ -18,6 +19,8 @@ export type AppManifest = {
   allowedOrigins: string[]
   heartbeatTimeoutMs?: number
   authType: RuntimeAuthType
+  oauthProvider?: OAuthProvider
+  oauthScopes?: string[]
   subjectTags: string[]
   gradeBand?: string
   llmSafeFields: string[]
@@ -103,4 +106,16 @@ export type BridgeSessionRecord = {
   userId: string
   bridgeState: SessionBridgeState
   updatedAt: number
+}
+
+export type OAuthTokenRecord = {
+  userId: string
+  appId: string
+  provider: OAuthProvider
+  accessToken: string
+  refreshToken?: string
+  expiresAt?: number
+  scopes: string[]
+  createdAt: number
+  lastRefreshedAt?: number
 }
