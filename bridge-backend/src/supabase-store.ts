@@ -75,13 +75,25 @@ export function isSupabasePersistenceEnabled() {
 }
 
 export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClient()): BridgeStore {
+  let seedPromise: Promise<void> | null = null
+
+  async function ensureSeeded() {
+    if (!seedPromise) {
+      seedPromise = bootstrapSeedData(client)
+    }
+
+    await seedPromise
+  }
+
   return {
     async listRegistryEntries() {
+      await ensureSeeded()
       const rows = await readRegistryRows(client)
       return rows.map(mapRegistryRow)
     },
 
     async getRegistryEntry(appId) {
+      await ensureSeeded()
       const { data, error } = await client
         .from('apps')
         .select('app_id, review_state, registered_at, reviewed_at, review_notes, manifest')
@@ -96,6 +108,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     },
 
     async listApprovedAppsForClass(classId) {
+      await ensureSeeded()
       const { data: allowlistRows, error: allowlistError } = await client
         .from('class_allowlists')
         .select('id, class_id, app_id, enabled_by, enabled_at, disabled_at')
@@ -127,6 +140,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     },
 
     async listClassAllowlist(classId) {
+      await ensureSeeded()
       const { data, error } = await client
         .from('class_allowlists')
         .select('id, class_id, app_id, enabled_by, enabled_at, disabled_at')
@@ -142,6 +156,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     },
 
     async registerApp(manifest) {
+      await ensureSeeded()
       const existing = await this.getRegistryEntry(manifest.appId)
       const now = Date.now()
 
@@ -168,6 +183,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     },
 
     async updateReviewState(appId, reviewState, reviewerId, reviewNotes) {
+      await ensureSeeded()
       const existing = await this.getRegistryEntry(appId)
       if (!existing) {
         return undefined
@@ -208,6 +224,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     },
 
     async enableAppForClass(classId, appId, enabledBy) {
+      await ensureSeeded()
       const appEntry = await this.getRegistryEntry(appId)
       if (!appEntry || appEntry.reviewState !== 'approved') {
         return undefined
@@ -236,6 +253,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     },
 
     async disableAppForClass(classId, appId, _enabledBy) {
+      await ensureSeeded()
       const existingRows = await this.listClassAllowlist(classId)
       const existing = existingRows.find((entry) => entry.appId === appId && !entry.disabledAt)
       if (!existing) {
@@ -259,6 +277,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     },
 
     async appendAuditEvent(event) {
+      await ensureSeeded()
       const row: SupabaseAuditEventRow = {
         id: randomUUID(),
         timestamp: event.timestamp,
@@ -290,6 +309,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     },
 
     async listAuditEvents() {
+      await ensureSeeded()
       const { data, error } = await client
         .from('audit_events')
         .select(
@@ -306,6 +326,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     },
 
     async listReviewActions() {
+      await ensureSeeded()
       const { data, error } = await client
         .from('review_actions')
         .select('id, app_id, version, action, reviewer_id, notes, timestamp')
@@ -320,6 +341,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     },
 
     async getBridgeSessionState(sessionId, userId) {
+      await ensureSeeded()
       const { data, error } = await client
         .from('bridge_sessions')
         .select('id, session_id, user_id, bridge_state, updated_at')
@@ -334,6 +356,7 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     },
 
     async upsertBridgeSessionState(sessionId, userId, bridgeState) {
+      await ensureSeeded()
       const row: SupabaseBridgeSessionRow = {
         id: `${sessionId}:${userId}`,
         session_id: sessionId,
@@ -354,6 +377,62 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 
       return mapBridgeSessionRow(data)
     },
+  }
+}
+
+async function bootstrapSeedData(client: SupabaseClient) {
+  const { count: appCount, error: appCountError } = await client
+    .from('apps')
+    .select('app_id', { count: 'exact', head: true })
+
+  if (appCountError) {
+    throw appCountError
+  }
+
+  const seedData = createSupabaseSeedData()
+
+  if (!appCount) {
+    const { error: seedAppsError } = await client.from('apps').upsert(
+      seedData.registryEntries.map((entry) => ({
+        app_id: entry.manifest.appId,
+        review_state: entry.reviewState,
+        registered_at: entry.registeredAt,
+        reviewed_at: entry.reviewedAt ?? null,
+        review_notes: entry.reviewNotes ?? null,
+        manifest: entry.manifest,
+      })),
+      { onConflict: 'app_id' }
+    )
+
+    if (seedAppsError) {
+      throw seedAppsError
+    }
+  }
+
+  const { count: allowlistCount, error: allowlistCountError } = await client
+    .from('class_allowlists')
+    .select('id', { count: 'exact', head: true })
+
+  if (allowlistCountError) {
+    throw allowlistCountError
+  }
+
+  if (!allowlistCount) {
+    const { error: seedAllowlistError } = await client.from('class_allowlists').upsert(
+      seedData.classAllowlist.map((entry) => ({
+        id: `${entry.classId}:${entry.appId}`,
+        class_id: entry.classId,
+        app_id: entry.appId,
+        enabled_by: entry.enabledBy,
+        enabled_at: entry.enabledAt,
+        disabled_at: entry.disabledAt ?? null,
+      })),
+      { onConflict: 'id' }
+    )
+
+    if (seedAllowlistError) {
+      throw seedAllowlistError
+    }
   }
 }
 
@@ -439,6 +518,109 @@ function mapBridgeSessionRow(row: SupabaseBridgeSessionRow): BridgeSessionRecord
     userId: row.user_id,
     bridgeState: row.bridge_state,
     updatedAt: row.updated_at,
+  }
+}
+
+function createSupabaseSeedData() {
+  const now = Date.now()
+  const weatherAppUrl = getConfiguredWeatherAppUrl()
+  const weatherAllowedOrigins = getAllowedOriginsForLaunchUrl(weatherAppUrl)
+
+  return {
+    registryEntries: [
+      {
+        reviewState: 'approved' as const,
+        registeredAt: now,
+        reviewedAt: now,
+        reviewNotes: undefined,
+        manifest: {
+          appId: 'chess',
+          name: 'Chess Coach',
+          version: '1.0.0',
+          description: 'Interactive chess board with guided tutoring.',
+          developerName: 'ChatBridge Demo',
+          executionModel: 'iframe' as const,
+          allowedOrigins: ['https://apps.chatbridge.local'],
+          authType: 'none' as const,
+          subjectTags: ['Strategy', 'Logic'],
+          gradeBand: '3-12',
+          llmSafeFields: ['phase', 'fen'],
+          tools: [
+            {
+              name: 'chatbridge_chess_start_game',
+              description: 'Start a new chess game for the current student.',
+            },
+            {
+              name: 'chatbridge_chess_get_hint',
+              description: 'Get a tutoring hint for the current board position.',
+            },
+          ],
+        },
+      },
+      {
+        reviewState: 'approved' as const,
+        registeredAt: now,
+        reviewedAt: now,
+        reviewNotes: undefined,
+        manifest: {
+          appId: 'weather',
+          name: 'Weather Dashboard',
+          version: '1.0.0',
+          description: 'Lightweight public weather app for quick lookups.',
+          developerName: 'ChatBridge Demo',
+          executionModel: 'iframe' as const,
+          launchUrl: weatherAppUrl,
+          allowedOrigins: weatherAllowedOrigins,
+          heartbeatTimeoutMs: 10000,
+          authType: 'none' as const,
+          subjectTags: ['Science'],
+          gradeBand: 'K-12',
+          llmSafeFields: ['location', 'conditions', 'temperatureF'],
+          tools: [
+            {
+              name: 'chatbridge_weather_lookup',
+              description: 'Look up current weather for a student-selected location.',
+            },
+          ],
+        },
+      },
+      {
+        reviewState: 'approved' as const,
+        registeredAt: now,
+        reviewedAt: now,
+        reviewNotes: undefined,
+        manifest: {
+          appId: 'google-classroom',
+          name: 'Google Classroom Assistant',
+          version: '1.0.0',
+          description: 'Read-only classroom context for due dates and coursework.',
+          developerName: 'ChatBridge Demo',
+          executionModel: 'iframe' as const,
+          allowedOrigins: ['https://apps.chatbridge.local'],
+          authType: 'oauth2' as const,
+          subjectTags: ['Productivity', 'Classroom'],
+          gradeBand: '3-12',
+          llmSafeFields: ['courseCount', 'upcomingAssignments'],
+          tools: [
+            {
+              name: 'chatbridge_google_classroom_overview',
+              description: 'Retrieve a read-only summary of the student classroom workload.',
+            },
+          ],
+        },
+      },
+    ],
+    classAllowlist: [
+      { classId: 'demo-class', appId: 'chess', enabledBy: 'teacher-demo', enabledAt: now, disabledAt: undefined },
+      { classId: 'demo-class', appId: 'weather', enabledBy: 'teacher-demo', enabledAt: now, disabledAt: undefined },
+      {
+        classId: 'demo-class',
+        appId: 'google-classroom',
+        enabledBy: 'teacher-demo',
+        enabledAt: now,
+        disabledAt: undefined,
+      },
+    ],
   }
 }
 
