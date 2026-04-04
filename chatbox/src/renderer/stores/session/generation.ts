@@ -40,6 +40,11 @@ import { uiStore } from '../uiStore'
 import { createNewFork, findMessageLocation } from './forks'
 import { insertMessageAfter, modifyMessage } from './messages'
 
+function isUserCancelledGeneration(error: Error) {
+  const message = error.message.toLowerCase()
+  return error.name === 'AbortError' || message.includes('aborted') || message.includes('aborterror')
+}
+
 /**
  * Get session-level web browsing setting
  * Returns user's explicit setting if set, otherwise returns default based on provider
@@ -381,6 +386,21 @@ export async function generate(
     appleAppStore.tickAfterMessageGenerated()
   } catch (err: unknown) {
     const error = !(err instanceof Error) ? new Error(`${err}`) : err
+    if (isUserCancelledGeneration(error)) {
+      targetMsg = {
+        ...targetMsg,
+        generating: false,
+        cancel: undefined,
+        error: undefined,
+        errorCode: undefined,
+        errorExtra: undefined,
+        status: [],
+        finishReason: 'cancel',
+      }
+      await modifyMessage(sessionId, targetMsg, true)
+      return
+    }
+
     const isExpectedOCRError = error instanceof OCRError && error.cause instanceof BaseError
     if (
       !(

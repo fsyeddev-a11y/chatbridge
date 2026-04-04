@@ -123,6 +123,7 @@ const _Message: FC<Props> = (props) => {
   }, [msg, setQuote])
 
   const handleStop = useCallback(() => {
+    msg.cancel?.()
     modifyMessage(sessionId, { ...msg, generating: false }, true)
   }, [sessionId, msg])
 
@@ -190,7 +191,11 @@ const _Message: FC<Props> = (props) => {
       tips.push(`token count: ${msg.tokenCount}`)
     }
     if (showTokenUsed && msg.role === 'assistant' && !msg.generating) {
-      tips.push(`tokens used: ${msg.usage?.totalTokens ? msg.usage.totalTokens : msg.tokensUsed || 'unknown'}`)
+      if (msg.finishReason === 'cancel') {
+        tips.push('cancelled by user')
+      } else {
+        tips.push(`tokens used: ${msg.usage?.totalTokens ? msg.usage.totalTokens : msg.tokensUsed || 'unknown'}`)
+      }
       // `tokens used: ${msg.usage?.totalTokens ? `${msg.usage.totalTokens}${msg.usage.cachedInputTokens ? `(cached: ${msg.usage.cachedInputTokens})` : ''}` : msg.tokensUsed || 'unknown'}`
     }
     if (showFirstTokenLatency && msg.role === 'assistant' && !msg.generating) {
