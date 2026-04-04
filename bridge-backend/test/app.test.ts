@@ -110,7 +110,7 @@ describe('bridge-backend app', () => {
     })
 
     assert.equal(response.statusCode, 400)
-    assert.equal(response.json().error, 'validation_error')
+    assert.equal(response.json().error, 'malformed')
   })
 
   it('responds to audit preflight requests with the required CORS headers', async () => {
@@ -471,6 +471,74 @@ describe('bridge-backend app', () => {
     assert.equal(first.statusCode, 200)
     assert.equal(second.statusCode, 429)
     assert.equal(second.json().error, 'rate_limited')
+  })
+
+  it('returns oversized for chat requests that exceed policy limits and audits the rejection', async () => {
+    const store = createInMemoryBridgeStore()
+    const app = createApp({ store, authVerifier: allowAllAuth, chatClient: fakeChatClient })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        messages: [
+          {
+            role: 'user',
+            content: 'x'.repeat(8001),
+          },
+        ],
+      },
+    })
+
+    assert.equal(response.statusCode, 413)
+    assert.equal(response.json().error, 'oversized')
+
+    const auditEvents = await store.listAuditEvents()
+    assert.equal(auditEvents.at(-1)?.eventType, 'OversizedRequestRejected')
+  })
+
+  it('applies per-session rate limits when a chat session id is provided', async () => {
+    const app = createApp({
+      store: createInMemoryBridgeStore(),
+      authVerifier: allowAllAuth,
+      chatClient: fakeChatClient,
+      chatRateLimiterSet: {
+        perUser: null,
+        perSession: createInMemoryFixedWindowRateLimiter(1, 60_000),
+        perIp: null,
+      },
+    })
+
+    const firstResponse = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        sessionId: 'session-1',
+        messages: [{ role: 'user', content: 'Hello' }],
+      },
+    })
+
+    const secondResponse = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        sessionId: 'session-1',
+        messages: [{ role: 'user', content: 'Hello again' }],
+      },
+    })
+
+    assert.equal(firstResponse.statusCode, 200)
+    assert.equal(secondResponse.statusCode, 429)
+    assert.equal(secondResponse.json().scope, 'session')
   })
 
   it('persists and reloads bridge session state through the backend session API', async () => {

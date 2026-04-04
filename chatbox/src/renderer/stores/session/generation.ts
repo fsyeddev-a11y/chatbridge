@@ -18,6 +18,7 @@ import { identity, pickBy } from 'lodash'
 import { createModelDependencies } from '@/adapters'
 import * as appleAppStore from '@/packages/apple_app_store'
 import { generateBackendChat } from '@/packages/backend-chat'
+import { getSessionBridgeState } from '@/packages/chatbridge/session'
 import { buildContextForAI } from '@/packages/context-management'
 import {
   buildAttachmentWrapperPrefix,
@@ -216,6 +217,7 @@ export async function generate(
         }
 
         if (USE_CHATBRIDGE_BACKEND_CHAT) {
+          const bridgeState = getSessionBridgeState(session)
           targetMsg = {
             ...targetMsg,
             aiProvider: 'chatbridge-backend',
@@ -223,7 +225,10 @@ export async function generate(
             status: [],
           }
           await modifyMessage(sessionId, targetMsg, false, true)
-          const backendResult = await generateBackendChat(promptMsgs)
+          const backendResult = await generateBackendChat(promptMsgs, {
+            sessionId,
+            classId: bridgeState.activeClassId,
+          })
           firstTokenLatency = Date.now() - startTime
           targetMsg = {
             ...targetMsg,

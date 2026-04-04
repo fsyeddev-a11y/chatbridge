@@ -9,7 +9,13 @@ export type BackendChatResult = {
   model: string
 }
 
-export async function generateBackendChat(messages: Message[]): Promise<BackendChatResult> {
+export async function generateBackendChat(
+  messages: Message[],
+  options?: {
+    sessionId?: string
+    classId?: string
+  }
+): Promise<BackendChatResult> {
   const authHeaders = await getSupabaseAuthHeaders()
   const response = await fetch(`${CHATBRIDGE_API_ORIGIN}/api/chat/generate`, {
     method: 'POST',
@@ -18,6 +24,8 @@ export async function generateBackendChat(messages: Message[]): Promise<BackendC
       ...authHeaders,
     },
     body: JSON.stringify({
+      sessionId: options?.sessionId,
+      classId: options?.classId,
       messages: messages
         .map((message) => ({
           role: message.role,

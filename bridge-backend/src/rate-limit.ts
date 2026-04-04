@@ -8,6 +8,12 @@ export type RateLimiter = {
   check(key: string): RateLimitCheckResult
 }
 
+export type ChatRateLimiterSet = {
+  perUser: RateLimiter | null
+  perSession: RateLimiter | null
+  perIp: RateLimiter | null
+}
+
 type CounterEntry = {
   count: number
   resetAt: number
@@ -71,4 +77,60 @@ export function createConfiguredChatRateLimiter() {
   }
 
   return createInMemoryFixedWindowRateLimiter(maxRequests, windowMs)
+}
+
+function getConfiguredNamedRateLimit(
+  maxRequestsValue: string | undefined,
+  windowMsValue: string | undefined,
+  fallbackWindowMs = 60_000
+) {
+  const parsedMaxRequests = Number(maxRequestsValue || 0)
+  const parsedWindowMs = Number(windowMsValue || fallbackWindowMs)
+
+  return {
+    maxRequests: Number.isFinite(parsedMaxRequests) && parsedMaxRequests > 0 ? parsedMaxRequests : 0,
+    windowMs: Number.isFinite(parsedWindowMs) && parsedWindowMs > 0 ? parsedWindowMs : fallbackWindowMs,
+  }
+}
+
+export function getConfiguredChatRateLimiterSet(env = process.env): {
+  perUser: { maxRequests: number; windowMs: number }
+  perSession: { maxRequests: number; windowMs: number }
+  perIp: { maxRequests: number; windowMs: number }
+} {
+  const legacy = getConfiguredChatRateLimit(
+    env.CHATBRIDGE_CHAT_RATE_LIMIT_MAX_REQUESTS,
+    env.CHATBRIDGE_CHAT_RATE_LIMIT_WINDOW_MS
+  )
+
+  return {
+    perUser: getConfiguredNamedRateLimit(
+      env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_USER_MAX_REQUESTS ?? (legacy.maxRequests ? String(legacy.maxRequests) : undefined),
+      env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_USER_WINDOW_MS ?? (legacy.maxRequests ? String(legacy.windowMs) : undefined)
+    ),
+    perSession: getConfiguredNamedRateLimit(
+      env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_SESSION_MAX_REQUESTS,
+      env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_SESSION_WINDOW_MS
+    ),
+    perIp: getConfiguredNamedRateLimit(
+      env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_IP_MAX_REQUESTS,
+      env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_IP_WINDOW_MS
+    ),
+  }
+}
+
+export function createConfiguredChatRateLimiterSet(): ChatRateLimiterSet {
+  const configured = getConfiguredChatRateLimiterSet()
+
+  return {
+    perUser: configured.perUser.maxRequests
+      ? createInMemoryFixedWindowRateLimiter(configured.perUser.maxRequests, configured.perUser.windowMs)
+      : null,
+    perSession: configured.perSession.maxRequests
+      ? createInMemoryFixedWindowRateLimiter(configured.perSession.maxRequests, configured.perSession.windowMs)
+      : null,
+    perIp: configured.perIp.maxRequests
+      ? createInMemoryFixedWindowRateLimiter(configured.perIp.maxRequests, configured.perIp.windowMs)
+      : null,
+  }
 }

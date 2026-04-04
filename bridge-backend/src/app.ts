@@ -1,8 +1,8 @@
-import Fastify, { type FastifyInstance } from 'fastify'
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
 import { ZodError } from 'zod'
 import { createSupabaseAuthVerifier, getBearerToken, type AuthVerifier } from './auth.js'
 import { createOpenAIChatClient, type ChatCompletionClient } from './chat.js'
-import { createConfiguredChatRateLimiter, type RateLimiter } from './rate-limit.js'
+import { createConfiguredChatRateLimiterSet, type ChatRateLimiterSet, type RateLimitCheckResult, type RateLimiter } from './rate-limit.js'
 import {
   AppIdParamsSchema,
   AppManifestSchema,
@@ -23,6 +23,7 @@ export type AppOptions = {
   authVerifier?: AuthVerifier
   chatClient?: ChatCompletionClient
   chatRateLimiter?: RateLimiter | null
+  chatRateLimiterSet?: ChatRateLimiterSet
 }
 
 const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://localhost:4173']
@@ -46,7 +47,13 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   const allowedOrigins = new Set(options.allowedOrigins ?? getConfiguredAllowedOrigins())
   const authVerifier = options.authVerifier ?? createSupabaseAuthVerifier()
   const chatClient = options.chatClient ?? createOpenAIChatClient()
-  const chatRateLimiter = options.chatRateLimiter ?? createConfiguredChatRateLimiter()
+  const configuredRateLimiterSet = options.chatRateLimiterSet ?? createConfiguredChatRateLimiterSet()
+  const chatRateLimiter = options.chatRateLimiter ?? configuredRateLimiterSet.perUser
+  const chatRateLimiterSet = {
+    perUser: chatRateLimiter,
+    perSession: configuredRateLimiterSet.perSession,
+    perIp: configuredRateLimiterSet.perIp,
+  }
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin
@@ -82,10 +89,24 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     request.headers['x-chatbridge-user-id'] = user.id
   })
 
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler(async (error, request, reply) => {
     if (error instanceof ZodError) {
-      return reply.status(400).send({
-        error: 'validation_error',
+      const isOversized = error.issues.some((issue) => issue.code === 'too_big')
+      await appendAbuseAuditEvent(store, {
+        eventType: isOversized ? 'OversizedRequestRejected' : 'MalformedRequestRejected',
+        summary: isOversized ? 'Request rejected for exceeding policy size limits.' : 'Request rejected for malformed payload.',
+        metadata: {
+          path: request.url,
+          method: request.method,
+          issues: error.issues.map((issue) => ({
+            code: issue.code,
+            path: issue.path.join('.'),
+          })),
+        },
+      })
+
+      return reply.status(isOversized ? 413 : 400).send({
+        error: isOversized ? 'oversized' : 'malformed',
         details: error.flatten(),
       })
     }
@@ -253,20 +274,20 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
 
   app.post('/api/chat/generate', async (request, reply) => {
     const userId = request.headers['x-chatbridge-user-id']
-    if (chatRateLimiter && typeof userId === 'string') {
-      const limit = chatRateLimiter.check(`chat:${userId}`)
-      reply.header('X-RateLimit-Remaining', String(limit.remaining))
-      reply.header('X-RateLimit-Reset', String(limit.resetAt))
+    const body = BackendChatRequestSchema.parse(request.body)
+    const limited = await applyChatRateLimits({
+      request,
+      reply,
+      store,
+      rateLimiters: chatRateLimiterSet,
+      userId: typeof userId === 'string' ? userId : undefined,
+      sessionId: body.sessionId,
+    })
 
-      if (!limit.allowed) {
-        return reply.status(429).send({
-          error: 'rate_limited',
-          retryAfterMs: Math.max(0, limit.resetAt - Date.now()),
-        })
-      }
+    if (limited) {
+      return limited
     }
 
-    const body = BackendChatRequestSchema.parse(request.body)
     const response = await chatClient({
       messages: body.messages,
     })
@@ -275,4 +296,98 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   return app
+}
+
+function getRequestIp(request: FastifyRequest) {
+  const forwardedFor = request.headers['x-forwarded-for']
+  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+    return forwardedFor.split(',')[0]?.trim() || request.ip
+  }
+
+  return request.ip
+}
+
+async function appendAbuseAuditEvent(
+  store: BridgeStore,
+  input: {
+    eventType: string
+    summary: string
+    sessionId?: string
+    classId?: string
+    metadata?: Record<string, unknown>
+  }
+) {
+  await store.appendAuditEvent({
+    timestamp: Date.now(),
+    traceId: `abuse-${Date.now()}`,
+    eventType: input.eventType,
+    source: 'bridge-backend',
+    sessionId: input.sessionId,
+    classId: input.classId,
+    summary: input.summary,
+    metadata: input.metadata,
+  })
+}
+
+async function applyChatRateLimits(input: {
+  request: FastifyRequest
+  reply: FastifyReply
+  store: BridgeStore
+  rateLimiters: ChatRateLimiterSet
+  userId?: string
+  sessionId?: string
+}) {
+  const checks: Array<{ scope: 'user' | 'session' | 'ip'; result: RateLimitCheckResult }> = []
+
+  if (input.rateLimiters.perUser && input.userId) {
+    checks.push({
+      scope: 'user',
+      result: input.rateLimiters.perUser.check(`chat:user:${input.userId}`),
+    })
+  }
+
+  if (input.rateLimiters.perSession && input.sessionId) {
+    checks.push({
+      scope: 'session',
+      result: input.rateLimiters.perSession.check(`chat:session:${input.sessionId}`),
+    })
+  }
+
+  const requestIp = getRequestIp(input.request)
+  if (input.rateLimiters.perIp && requestIp) {
+    checks.push({
+      scope: 'ip',
+      result: input.rateLimiters.perIp.check(`chat:ip:${requestIp}`),
+    })
+  }
+
+  const firstRejected = checks.find((entry) => !entry.result.allowed)
+  const primaryHeaderSource = checks[0]
+  if (primaryHeaderSource) {
+    input.reply.header('X-RateLimit-Remaining', String(primaryHeaderSource.result.remaining))
+    input.reply.header('X-RateLimit-Reset', String(primaryHeaderSource.result.resetAt))
+  }
+
+  if (!firstRejected) {
+    return null
+  }
+
+  const retryAfterMs = Math.max(0, firstRejected.result.resetAt - Date.now())
+  await appendAbuseAuditEvent(input.store, {
+    eventType: 'RateLimitExceeded',
+    summary: `Chat generation rate limited at ${firstRejected.scope} scope.`,
+    sessionId: input.sessionId,
+    metadata: {
+      scope: firstRejected.scope,
+      retryAfterMs,
+      requestIp,
+      userId: input.userId,
+    },
+  })
+
+  return input.reply.status(429).send({
+    error: 'rate_limited',
+    scope: firstRejected.scope,
+    retryAfterMs,
+  })
 }

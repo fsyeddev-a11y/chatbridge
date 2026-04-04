@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { createConfiguredChatRateLimiter, createInMemoryFixedWindowRateLimiter, getConfiguredChatRateLimit } from '../src/rate-limit.js'
+import {
+  createConfiguredChatRateLimiter,
+  createConfiguredChatRateLimiterSet,
+  createInMemoryFixedWindowRateLimiter,
+  getConfiguredChatRateLimit,
+  getConfiguredChatRateLimiterSet,
+} from '../src/rate-limit.js'
 
 describe('bridge-backend rate limiting', () => {
   it('applies a fixed-window limit per key', () => {
@@ -52,6 +58,51 @@ describe('bridge-backend rate limiting', () => {
       } else {
         process.env.CHATBRIDGE_CHAT_RATE_LIMIT_WINDOW_MS = originalWindow
       }
+    }
+  })
+
+  it('parses multi-scope chat rate limit env safely', () => {
+    assert.deepEqual(
+      getConfiguredChatRateLimiterSet({
+        CHATBRIDGE_CHAT_RATE_LIMIT_PER_USER_MAX_REQUESTS: '4',
+        CHATBRIDGE_CHAT_RATE_LIMIT_PER_USER_WINDOW_MS: '45000',
+        CHATBRIDGE_CHAT_RATE_LIMIT_PER_SESSION_MAX_REQUESTS: '2',
+        CHATBRIDGE_CHAT_RATE_LIMIT_PER_SESSION_WINDOW_MS: '30000',
+        CHATBRIDGE_CHAT_RATE_LIMIT_PER_IP_MAX_REQUESTS: '8',
+        CHATBRIDGE_CHAT_RATE_LIMIT_PER_IP_WINDOW_MS: '60000',
+      } as NodeJS.ProcessEnv),
+      {
+        perUser: { maxRequests: 4, windowMs: 45000 },
+        perSession: { maxRequests: 2, windowMs: 30000 },
+        perIp: { maxRequests: 8, windowMs: 60000 },
+      }
+    )
+  })
+
+  it('creates only the configured multi-scope rate limiters', () => {
+    const originalUserMax = process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_USER_MAX_REQUESTS
+    const originalUserWindow = process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_USER_WINDOW_MS
+    const originalSessionMax = process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_SESSION_MAX_REQUESTS
+    const originalIpMax = process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_IP_MAX_REQUESTS
+    process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_USER_MAX_REQUESTS = '3'
+    process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_USER_WINDOW_MS = '60000'
+    delete process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_SESSION_MAX_REQUESTS
+    delete process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_IP_MAX_REQUESTS
+
+    try {
+      const limiterSet = createConfiguredChatRateLimiterSet()
+      assert.ok(limiterSet.perUser)
+      assert.equal(limiterSet.perSession, null)
+      assert.equal(limiterSet.perIp, null)
+    } finally {
+      if (originalUserMax === undefined) delete process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_USER_MAX_REQUESTS
+      else process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_USER_MAX_REQUESTS = originalUserMax
+      if (originalUserWindow === undefined) delete process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_USER_WINDOW_MS
+      else process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_USER_WINDOW_MS = originalUserWindow
+      if (originalSessionMax === undefined) delete process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_SESSION_MAX_REQUESTS
+      else process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_SESSION_MAX_REQUESTS = originalSessionMax
+      if (originalIpMax === undefined) delete process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_IP_MAX_REQUESTS
+      else process.env.CHATBRIDGE_CHAT_RATE_LIMIT_PER_IP_MAX_REQUESTS = originalIpMax
     }
   })
 })
