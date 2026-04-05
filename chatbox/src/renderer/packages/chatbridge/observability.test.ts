@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { trackEventMock, fetchMock } = vi.hoisted(() => ({
   trackEventMock: vi.fn(),
@@ -18,8 +18,32 @@ vi.mock('@/packages/supabase', () => ({
 vi.stubGlobal('fetch', fetchMock)
 
 import { emitChatBridgeEvent } from './observability'
+import { getSupabaseAuthHeaders } from '@/packages/supabase'
 
 describe('emitChatBridgeEvent', () => {
+  beforeEach(() => {
+    fetchMock.mockReset()
+    trackEventMock.mockReset()
+    vi.mocked(getSupabaseAuthHeaders).mockReset()
+    vi.mocked(getSupabaseAuthHeaders).mockResolvedValue({
+      Authorization: 'Bearer token-1',
+    })
+  })
+
+  it('skips backend audit delivery when no auth token is available', async () => {
+    vi.mocked(getSupabaseAuthHeaders).mockResolvedValueOnce({})
+
+    emitChatBridgeEvent({
+      name: 'GenerationStarted',
+      payload: {
+        traceId: 'trace-2',
+      },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('forwards only defined structured fields to tracking', async () => {
     fetchMock.mockResolvedValue({
       ok: true,

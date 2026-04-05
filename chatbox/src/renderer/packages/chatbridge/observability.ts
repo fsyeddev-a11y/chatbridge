@@ -47,18 +47,31 @@ function sanitizeEventPayload(payload: ChatBridgeEventPayload): Record<string, u
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined))
 }
 
+function shouldWarnAuditFailures() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+}
+
 export function emitChatBridgeEvent(event: ChatBridgeEvent) {
   const safePayload = sanitizeEventPayload(event.payload)
   trackEvent(`chatbridge_${event.name}`, safePayload)
 
   void getSupabaseAuthHeaders()
-    .then((authHeaders) =>
-      fetch(`${CHATBRIDGE_API_ORIGIN}/api/audit/events`, {
+    .then((authHeaders) => {
+      if (!authHeaders.Authorization) {
+        return null
+      }
+
+      return fetch(`${CHATBRIDGE_API_ORIGIN}/api/audit/events`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...authHeaders,
         },
+        keepalive: true,
         body: JSON.stringify({
           timestamp: Date.now(),
           traceId: event.payload.traceId,
@@ -71,8 +84,17 @@ export function emitChatBridgeEvent(event: ChatBridgeEvent) {
           metadata: safePayload,
         }),
       })
-    )
+    })
+    .then((response) => {
+      if (!response || response.ok || response.status === 401 || response.status === 403) {
+        return
+      }
+
+      throw new Error(`ChatBridge audit request failed: ${response.status}`)
+    })
     .catch((error) => {
-      console.warn('Failed to send ChatBridge audit event', error)
+      if (shouldWarnAuditFailures()) {
+        console.warn('Failed to send ChatBridge audit event', error)
+      }
     })
 }
