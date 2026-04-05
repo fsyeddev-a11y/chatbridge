@@ -205,15 +205,14 @@ const sessionUpdateQueues: Record<string, UpdateQueue<Session>> = {}
 
 export async function updateSessionWithMessages(sessionId: string, updater: Updater<Session>) {
   console.debug('chatStore', 'updateSession', sessionId, updater)
-  if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
-    queryClient.setQueryData(QueryKeys.ChatSession(sessionId), (prev: Session | null | undefined) =>
-      applySessionUpdater(sessionId, prev, updater)
-    )
-  }
   if (!sessionUpdateQueues[sessionId]) {
     // do not use await here to avoid data race
+    const initialSession =
+      USE_CHATBRIDGE_BACKEND_SESSIONS
+        ? ((queryClient.getQueryData(QueryKeys.ChatSession(sessionId)) as Session | null | undefined) ?? null)
+        : undefined
     sessionUpdateQueues[sessionId] = new UpdateQueue<Session>(
-      () => getSession(sessionId),
+      initialSession ?? (() => getSession(sessionId)),
       async (session) => {
         if (session) {
           console.debug('chatStore', 'persist session', sessionId)
@@ -232,6 +231,11 @@ export async function updateSessionWithMessages(sessionId: string, updater: Upda
           }
         }
       }
+    )
+  }
+  if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
+    queryClient.setQueryData(QueryKeys.ChatSession(sessionId), (prev: Session | null | undefined) =>
+      applySessionUpdater(sessionId, prev, updater)
     )
   }
   let needUpdateSessionList = true
