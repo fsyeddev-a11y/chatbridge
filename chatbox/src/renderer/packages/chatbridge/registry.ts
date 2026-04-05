@@ -78,6 +78,32 @@ type ReviewActionsApiResponse = {
   actions: ChatBridgeReviewAction[]
 }
 
+export type ChatBridgeWorkspaceUser = {
+  user: {
+    userId: string
+    email?: string
+    role: 'admin' | 'teacher' | 'student' | 'developer'
+    roles: Array<'admin' | 'teacher' | 'student' | 'developer'>
+    createdAt: number
+    updatedAt: number
+  }
+  classes: Array<{
+    classId: string
+    name: string
+    organizationId?: string
+    externalRef?: string
+    createdAt: number
+    updatedAt: number
+  }>
+  memberships: Array<{
+    classId: string
+    userId: string
+    membershipRole: 'teacher' | 'student'
+    createdAt: number
+    removedAt?: number
+  }>
+}
+
 const CHATBRIDGE_API_ORIGIN = process.env.CHATBRIDGE_API_ORIGIN || 'http://localhost:8787'
 const CHATBRIDGE_WEATHER_APP_URL = process.env.CHATBRIDGE_WEATHER_APP_URL || 'http://localhost:4173'
 const CHATBRIDGE_WEATHER_APP_ORIGIN = (() => {
@@ -89,6 +115,7 @@ const CHATBRIDGE_WEATHER_APP_ORIGIN = (() => {
 })()
 
 export const ChatBridgeQueryKeys = {
+  ChatBridgeMe: ['chatbridge', 'me'],
   ChatBridgeApps: ['chatbridge', 'apps'],
   ChatBridgeDeveloperApps: ['chatbridge', 'developer-apps'],
   ChatBridgeDeveloperReviewActions: ['chatbridge', 'developer-review-actions'],
@@ -173,6 +200,10 @@ export async function fetchChatBridgeApps(): Promise<ChatBridgeAppDefinition[]> 
   return normalizeRegistryEntries(response.apps)
 }
 
+export async function fetchChatBridgeMe(): Promise<ChatBridgeWorkspaceUser> {
+  return fetchJson<ChatBridgeWorkspaceUser>('/api/me')
+}
+
 export async function fetchApprovedChatBridgeAppsForClass(classId: string): Promise<ChatBridgeAppDefinition[]> {
   const response = await fetchJson<ClassAppsApiResponse>(`/api/classes/${classId}/apps`)
   return normalizeRegistryEntries(response.apps)
@@ -195,14 +226,25 @@ export async function fetchChatBridgeAppById(appId: string | undefined): Promise
   }
 }
 
-export function useChatBridgeApps() {
+export function useChatBridgeMe(options?: { enabled?: boolean }) {
+  const { loading, isAuthenticated } = useSupabaseAuthState()
+
+  return useQuery({
+    queryKey: ChatBridgeQueryKeys.ChatBridgeMe,
+    queryFn: fetchChatBridgeMe,
+    staleTime: 30_000,
+    enabled: (options?.enabled ?? true) && !loading && isAuthenticated,
+  })
+}
+
+export function useChatBridgeApps(options?: { enabled?: boolean }) {
   const { loading, isAuthenticated } = useSupabaseAuthState()
 
   return useQuery({
     queryKey: ChatBridgeQueryKeys.ChatBridgeApps,
     queryFn: fetchChatBridgeApps,
     staleTime: 30_000,
-    enabled: !loading && isAuthenticated,
+    enabled: (options?.enabled ?? true) && !loading && isAuthenticated,
   })
 }
 
@@ -211,14 +253,14 @@ export async function fetchDeveloperChatBridgeApps(): Promise<ChatBridgeAppDefin
   return normalizeRegistryEntries(response.apps)
 }
 
-export function useDeveloperChatBridgeApps() {
+export function useDeveloperChatBridgeApps(options?: { enabled?: boolean }) {
   const { loading, isAuthenticated } = useSupabaseAuthState()
 
   return useQuery({
     queryKey: ChatBridgeQueryKeys.ChatBridgeDeveloperApps,
     queryFn: fetchDeveloperChatBridgeApps,
     staleTime: 30_000,
-    enabled: !loading && isAuthenticated,
+    enabled: (options?.enabled ?? true) && !loading && isAuthenticated,
   })
 }
 
@@ -227,25 +269,25 @@ export async function fetchDeveloperChatBridgeReviewActions(): Promise<ChatBridg
   return response.actions
 }
 
-export function useDeveloperChatBridgeReviewActions() {
+export function useDeveloperChatBridgeReviewActions(options?: { enabled?: boolean }) {
   const { loading, isAuthenticated } = useSupabaseAuthState()
 
   return useQuery({
     queryKey: ChatBridgeQueryKeys.ChatBridgeDeveloperReviewActions,
     queryFn: fetchDeveloperChatBridgeReviewActions,
     staleTime: 30_000,
-    enabled: !loading && isAuthenticated,
+    enabled: (options?.enabled ?? true) && !loading && isAuthenticated,
   })
 }
 
-export function useApprovedChatBridgeAppsForClass(classId: string) {
+export function useApprovedChatBridgeAppsForClass(classId: string, options?: { enabled?: boolean }) {
   const { loading, isAuthenticated } = useSupabaseAuthState()
 
   return useQuery({
     queryKey: ChatBridgeQueryKeys.ChatBridgeClassApps(classId),
     queryFn: () => fetchApprovedChatBridgeAppsForClass(classId),
     staleTime: 30_000,
-    enabled: !!classId && !loading && isAuthenticated,
+    enabled: (options?.enabled ?? true) && !!classId && !loading && isAuthenticated,
   })
 }
 
@@ -254,14 +296,14 @@ export async function fetchChatBridgeAllowlist(classId: string): Promise<ChatBri
   return response.allowlist
 }
 
-export function useChatBridgeAllowlist(classId: string) {
+export function useChatBridgeAllowlist(classId: string, options?: { enabled?: boolean }) {
   const { loading, isAuthenticated } = useSupabaseAuthState()
 
   return useQuery({
     queryKey: ChatBridgeQueryKeys.ChatBridgeClassAllowlist(classId),
     queryFn: () => fetchChatBridgeAllowlist(classId),
     staleTime: 30_000,
-    enabled: !!classId && !loading && isAuthenticated,
+    enabled: (options?.enabled ?? true) && !!classId && !loading && isAuthenticated,
   })
 }
 
@@ -270,14 +312,14 @@ export async function fetchChatBridgeReviewActions(): Promise<ChatBridgeReviewAc
   return response.actions
 }
 
-export function useChatBridgeReviewActions() {
+export function useChatBridgeReviewActions(options?: { enabled?: boolean }) {
   const { loading, isAuthenticated } = useSupabaseAuthState()
 
   return useQuery({
     queryKey: ChatBridgeQueryKeys.ChatBridgeReviewActions,
     queryFn: fetchChatBridgeReviewActions,
     staleTime: 30_000,
-    enabled: !loading && isAuthenticated,
+    enabled: (options?.enabled ?? true) && !loading && isAuthenticated,
   })
 }
 

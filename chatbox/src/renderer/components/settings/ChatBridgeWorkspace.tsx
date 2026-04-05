@@ -28,6 +28,7 @@ import {
   reviewChatBridgeApp,
   useChatBridgeAllowlist,
   useChatBridgeApps,
+  useChatBridgeMe,
   useChatBridgeReviewActions,
   useDeveloperChatBridgeReviewActions,
   useDeveloperChatBridgeApps,
@@ -83,11 +84,27 @@ export default function ChatBridgeWorkspace() {
   const [errorMessage, setErrorMessage] = useState<string>()
   const [developerManifestJson, setDeveloperManifestJson] = useState(JSON.stringify(DEMO_STORY_BUILDER_MANIFEST, null, 2))
 
-  const { data: apps = [], error: appsError } = useChatBridgeApps()
-  const { data: allowlist = [], error: allowlistError } = useChatBridgeAllowlist(classId)
-  const { data: reviewActions = [], error: reviewActionsError } = useChatBridgeReviewActions()
-  const { data: developerApps = [], error: developerAppsError } = useDeveloperChatBridgeApps()
-  const { data: developerReviewActions = [], error: developerReviewActionsError } = useDeveloperChatBridgeReviewActions()
+  const { data: workspaceUser, error: workspaceUserError, isLoading: workspaceUserLoading } = useChatBridgeMe()
+  const effectiveRoles = workspaceUser?.user.roles || []
+  const canUseDeveloperWorkspace = effectiveRoles.includes('developer') || effectiveRoles.includes('admin')
+  const canUseAdminWorkspace = effectiveRoles.includes('admin')
+  const canUseTeacherWorkspace = effectiveRoles.includes('teacher') || effectiveRoles.includes('admin')
+
+  const { data: apps = [], error: appsError } = useChatBridgeApps({
+    enabled: canUseAdminWorkspace || canUseTeacherWorkspace,
+  })
+  const { data: allowlist = [], error: allowlistError } = useChatBridgeAllowlist(classId, {
+    enabled: canUseTeacherWorkspace,
+  })
+  const { data: reviewActions = [], error: reviewActionsError } = useChatBridgeReviewActions({
+    enabled: canUseAdminWorkspace,
+  })
+  const { data: developerApps = [], error: developerAppsError } = useDeveloperChatBridgeApps({
+    enabled: canUseDeveloperWorkspace,
+  })
+  const { data: developerReviewActions = [], error: developerReviewActionsError } = useDeveloperChatBridgeReviewActions({
+    enabled: canUseDeveloperWorkspace,
+  })
 
   const enabledAppIds = useMemo(
     () => new Set(allowlist.filter((entry) => !entry.disabledAt).map((entry) => entry.appId)),
@@ -107,6 +124,14 @@ export default function ChatBridgeWorkspace() {
     () => [...developerReviewActions].sort((left, right) => right.timestamp - left.timestamp),
     [developerReviewActions]
   )
+
+  const workspaceLoadError =
+    workspaceUserError ||
+    ((canUseAdminWorkspace || canUseTeacherWorkspace) ? appsError : undefined) ||
+    (canUseTeacherWorkspace ? allowlistError : undefined) ||
+    (canUseAdminWorkspace ? reviewActionsError : undefined) ||
+    (canUseDeveloperWorkspace ? developerAppsError : undefined) ||
+    (canUseDeveloperWorkspace ? developerReviewActionsError : undefined)
 
   const registerMutation = useMutation({
     mutationFn: () => registerChatBridgeApp(DEMO_STORY_BUILDER_MANIFEST),
@@ -195,321 +220,350 @@ export default function ChatBridgeWorkspace() {
 
       {statusMessage ? <Alert color="green">{statusMessage}</Alert> : null}
       {errorMessage ? <Alert color="red">{errorMessage}</Alert> : null}
-      {appsError || allowlistError || reviewActionsError || developerAppsError || developerReviewActionsError ? (
+      {workspaceUserLoading ? <Alert color="blue">Loading your ChatBridge workspace access…</Alert> : null}
+      {workspaceLoadError ? (
         <Alert color="red">
           ChatBridge backend data could not be loaded. This workspace no longer falls back to local mock state.
         </Alert>
       ) : null}
+      {workspaceUser ? (
+        <Group gap={8}>
+          {workspaceUser.user.roles.map((role) => (
+            <Badge key={role} variant="light">
+              {role}
+            </Badge>
+          ))}
+        </Group>
+      ) : null}
+
+      {!workspaceUserLoading && !workspaceLoadError && !canUseDeveloperWorkspace && !canUseAdminWorkspace && !canUseTeacherWorkspace ? (
+        <Alert color="blue">
+          This account can use TutorMeAI, but it does not currently have ChatBridge workspace permissions. Sign in as an
+          admin, teacher, or developer to manage apps here.
+        </Alert>
+      ) : null}
 
       <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
-        <Card withBorder radius="md" p="md">
-          <Stack gap="md">
-            <Group justify="space-between" align="center">
-              <Group gap={8}>
-                <IconSparkles size={16} />
-                <Title order={5}>Developer Portal</Title>
+        {canUseDeveloperWorkspace ? (
+          <Card withBorder radius="md" p="md">
+            <Stack gap="md">
+              <Group justify="space-between" align="center">
+                <Group gap={8}>
+                  <IconSparkles size={16} />
+                  <Title order={5}>Developer Portal</Title>
+                </Group>
+                <Badge variant="light">{developerApps.length} owned</Badge>
               </Group>
-              <Badge variant="light">{developerApps.length} owned</Badge>
-            </Group>
 
-            <Text size="sm" c="dimmed">
-              Submit a manifest as the currently signed-in developer and track the apps you own.
-            </Text>
+              <Text size="sm" c="dimmed">
+                Submit a manifest as the currently signed-in developer and track the apps you own.
+              </Text>
 
-            <Textarea
-              label="Manifest JSON"
-              minRows={12}
-              autosize
-              value={developerManifestJson}
-              onChange={(event) => setDeveloperManifestJson(event.currentTarget.value)}
-            />
+              <Textarea
+                label="Manifest JSON"
+                minRows={12}
+                autosize
+                value={developerManifestJson}
+                onChange={(event) => setDeveloperManifestJson(event.currentTarget.value)}
+              />
 
-            <Group justify="flex-end">
-              <Button loading={developerRegisterMutation.isPending} onClick={() => developerRegisterMutation.mutate()}>
-                Submit Manifest
-              </Button>
-            </Group>
-
-            <Stack gap="sm">
-              {developerApps.map((app) => (
-                <Card key={app.appId} withBorder radius="md" p="sm">
-                  <Stack gap={6}>
-                    <Group justify="space-between" align="flex-start">
-                      <div>
-                        <Text fw={600}>{app.name}</Text>
-                        <Text size="xs" c="dimmed">
-                          {app.appId} • {formatVersionStatus(app)}
-                        </Text>
-                      </div>
-                      <Badge variant="light">{app.reviewState}</Badge>
-                    </Group>
-                    <Text size="sm" c="dimmed">
-                      {app.description}
-                    </Text>
-                    <Text size="xs" c="dimmed">
-                      Owner: {app.ownerEmail || 'Current developer'}
-                    </Text>
-                    <Text size="xs" c="dimmed">
-                      Submitted: {formatTimestamp(app.registeredAt)}
-                      {app.reviewedAt ? ` • Reviewed: ${formatTimestamp(app.reviewedAt)}` : ''}
-                    </Text>
-                    {app.reviewNotes ? (
-                      <Alert color={app.reviewState === 'approved' ? 'green' : app.reviewState === 'pending' ? 'blue' : 'yellow'}>
-                        Latest feedback: {app.reviewNotes}
-                      </Alert>
-                    ) : (
-                      <Text size="xs" c="dimmed">
-                        No review feedback yet. Your app is currently {app.reviewState}.
-                      </Text>
-                    )}
-
-                    {developerReviewHistory.filter((action) => action.appId === app.appId).length ? (
-                      <Stack gap={4}>
-                        <Text size="xs" fw={600} c="dimmed">
-                          Review history
-                        </Text>
-                        {developerReviewHistory
-                          .filter((action) => action.appId === app.appId)
-                          .slice(0, 3)
-                          .map((action, index) => (
-                            <Text key={`${app.appId}-${action.timestamp}-${index}`} size="xs" c="dimmed">
-                              {action.action} • v{action.version} • {formatTimestamp(action.timestamp)}
-                              {action.notes ? ` • ${action.notes}` : ''}
-                            </Text>
-                          ))}
-                      </Stack>
-                    ) : null}
-                  </Stack>
-                </Card>
-              ))}
-
-              {!developerApps.length ? (
-                <Text size="sm" c="dimmed">
-                  You have not submitted any apps yet.
-                </Text>
-              ) : null}
-            </Stack>
-          </Stack>
-        </Card>
-
-        <Card withBorder radius="md" p="md">
-          <Stack gap="md">
-            <Group justify="space-between" align="center">
-              <Group gap={8}>
-                <IconShieldCheck size={16} />
-                <Title order={5}>Admin Registry Review</Title>
+              <Group justify="flex-end">
+                <Button loading={developerRegisterMutation.isPending} onClick={() => developerRegisterMutation.mutate()}>
+                  Submit Manifest
+                </Button>
               </Group>
-              <Button
-                size="xs"
-                variant="light"
-                leftSection={<IconSparkles size={14} />}
-                disabled={!!storyBuilderApp}
-                loading={registerMutation.isPending}
-                onClick={() => registerMutation.mutate()}
-              >
-                {storyBuilderApp ? 'Story Builder Registered' : 'Register Story Builder'}
-              </Button>
-            </Group>
 
-            <SegmentedControl
-              fullWidth
-              size="xs"
-              data={REVIEW_FILTERS}
-              value={reviewFilter}
-              onChange={(value) => setReviewFilter(value as ReviewFilter)}
-            />
-
-            <Stack gap="sm">
-              {visibleApps.map((app) => (
-                <Card key={app.appId} withBorder radius="md" p="sm">
-                  <Stack gap={8}>
-                    <Group justify="space-between" align="flex-start">
-                      <div>
-                        <Text fw={600}>{app.name}</Text>
-                        <Text size="xs" c="dimmed">
-                          {app.description}
-                        </Text>
-                      </div>
-                      <Group gap={6}>
-                        <Badge size="sm" variant="light">
-                          {app.reviewState}
-                        </Badge>
-                        <Badge size="sm" variant="outline">
-                          {app.executionModel}
-                        </Badge>
+              <Stack gap="sm">
+                {developerApps.map((app) => (
+                  <Card key={app.appId} withBorder radius="md" p="sm">
+                    <Stack gap={6}>
+                      <Group justify="space-between" align="flex-start">
+                        <div>
+                          <Text fw={600}>{app.name}</Text>
+                          <Text size="xs" c="dimmed">
+                            {app.appId} • {formatVersionStatus(app)}
+                          </Text>
+                        </div>
+                        <Badge variant="light">{app.reviewState}</Badge>
                       </Group>
-                    </Group>
+                      <Text size="sm" c="dimmed">
+                        {app.description}
+                      </Text>
+                      <Text size="xs" c="dimmed">
+                        Owner: {app.ownerEmail || 'Current developer'}
+                      </Text>
+                      <Text size="xs" c="dimmed">
+                        Submitted: {formatTimestamp(app.registeredAt)}
+                        {app.reviewedAt ? ` • Reviewed: ${formatTimestamp(app.reviewedAt)}` : ''}
+                      </Text>
+                      {app.reviewNotes ? (
+                        <Alert color={app.reviewState === 'approved' ? 'green' : app.reviewState === 'pending' ? 'blue' : 'yellow'}>
+                          Latest feedback: {app.reviewNotes}
+                        </Alert>
+                      ) : (
+                        <Text size="xs" c="dimmed">
+                          No review feedback yet. Your app is currently {app.reviewState}.
+                        </Text>
+                      )}
 
-                    <Text size="xs" c="dimmed">
-                      {app.appId} • {formatVersionStatus(app)} • {app.developerName}
-                    </Text>
+                      {developerReviewHistory.filter((action) => action.appId === app.appId).length ? (
+                        <Stack gap={4}>
+                          <Text size="xs" fw={600} c="dimmed">
+                            Review history
+                          </Text>
+                          {developerReviewHistory
+                            .filter((action) => action.appId === app.appId)
+                            .slice(0, 3)
+                            .map((action, index) => (
+                              <Text key={`${app.appId}-${action.timestamp}-${index}`} size="xs" c="dimmed">
+                                {action.action} • v{action.version} • {formatTimestamp(action.timestamp)}
+                                {action.notes ? ` • ${action.notes}` : ''}
+                              </Text>
+                            ))}
+                        </Stack>
+                      ) : null}
+                    </Stack>
+                  </Card>
+                ))}
 
-                    <Group gap={8}>
-                      <Button
-                        size="compact-sm"
-                        variant={app.reviewState === 'approved' ? 'filled' : 'light'}
-                        disabled={app.reviewState === 'approved'}
-                        loading={reviewMutation.isPending && reviewMutation.variables?.appId === app.appId}
-                        onClick={() =>
-                          reviewMutation.mutate({
-                            appId: app.appId,
-                            appName: app.name,
-                            reviewState: 'approved',
-                            version: app.pendingVersion || app.version,
-                          })
-                        }
-                      >
-                        Approve
-                      </Button>
-                      <Button
-                        size="compact-sm"
-                        variant="light"
-                        color="yellow"
-                        disabled={app.reviewState === 'suspended'}
-                        loading={reviewMutation.isPending && reviewMutation.variables?.appId === app.appId}
-                        onClick={() =>
-                          reviewMutation.mutate({
-                            appId: app.appId,
-                            appName: app.name,
-                            reviewState: 'suspended',
-                            version: app.pendingVersion || app.version,
-                          })
-                        }
-                      >
-                        Suspend
-                      </Button>
-                      <Button
-                        size="compact-sm"
-                        variant="subtle"
-                        color="red"
-                        disabled={app.reviewState === 'rejected'}
-                        loading={reviewMutation.isPending && reviewMutation.variables?.appId === app.appId}
-                        onClick={() =>
-                          reviewMutation.mutate({
-                            appId: app.appId,
-                            appName: app.name,
-                            reviewState: 'rejected',
-                            version: app.pendingVersion || app.version,
-                          })
-                        }
-                      >
-                        Reject
-                      </Button>
-                    </Group>
-                  </Stack>
-                </Card>
-              ))}
-
-              {!visibleApps.length ? (
-                <Text size="sm" c="dimmed">
-                  No apps match the current review filter.
-                </Text>
-              ) : null}
+                {!developerApps.length ? (
+                  <Text size="sm" c="dimmed">
+                    You have not submitted any apps yet.
+                  </Text>
+                ) : null}
+              </Stack>
             </Stack>
-          </Stack>
-        </Card>
+          </Card>
+        ) : null}
 
-        <Card withBorder radius="md" p="md">
-          <Stack gap="md">
-            <Group gap={8}>
-              <IconChecklist size={16} />
-              <Title order={5}>Teacher Class Allowlist</Title>
-            </Group>
+        {canUseAdminWorkspace ? (
+          <Card withBorder radius="md" p="md">
+            <Stack gap="md">
+              <Group justify="space-between" align="center">
+                <Group gap={8}>
+                  <IconShieldCheck size={16} />
+                  <Title order={5}>Admin Registry Review</Title>
+                </Group>
+                <Button
+                  size="xs"
+                  variant="light"
+                  leftSection={<IconSparkles size={14} />}
+                  disabled={!!storyBuilderApp}
+                  loading={registerMutation.isPending}
+                  onClick={() => registerMutation.mutate()}
+                >
+                  {storyBuilderApp ? 'Story Builder Registered' : 'Register Story Builder'}
+                </Button>
+              </Group>
 
-            <TextInput
-              label="Class ID"
-              value={classId}
-              onChange={(event) => setClassId(event.currentTarget.value.trim() || 'demo-class')}
-              description="Manage which approved apps are available to a class without opening a student session."
-            />
+              <SegmentedControl
+                fullWidth
+                size="xs"
+                data={REVIEW_FILTERS}
+                value={reviewFilter}
+                onChange={(value) => setReviewFilter(value as ReviewFilter)}
+              />
 
-            <Stack gap="sm">
-              {apps.map((app) => {
-                const allowlistEntry = allowlist.find((entry) => entry.appId === app.appId && !entry.disabledAt)
-                const isEnabled = enabledAppIds.has(app.appId)
-                const isReviewApproved = app.reviewState === 'approved'
-
-                return (
+              <Stack gap="sm">
+                {visibleApps.map((app) => (
                   <Card key={app.appId} withBorder radius="md" p="sm">
                     <Stack gap={8}>
                       <Group justify="space-between" align="flex-start">
                         <div>
                           <Text fw={600}>{app.name}</Text>
                           <Text size="xs" c="dimmed">
-                            {isReviewApproved
-                              ? isEnabled
-                                ? `Enabled by ${allowlistEntry?.enabledBy || 'teacher'} on ${formatTimestamp(allowlistEntry?.enabledAt)}`
-                                : `Approved but not enabled for ${classId}.`
-                              : `${app.reviewState} at the platform level.`}
+                            {app.description}
                           </Text>
                         </div>
-                        <Badge size="sm" variant={isReviewApproved ? 'light' : 'outline'} color={isReviewApproved ? 'blue' : 'gray'}>
-                          {app.reviewState}
-                        </Badge>
+                        <Group gap={6}>
+                          <Badge size="sm" variant="light">
+                            {app.reviewState}
+                          </Badge>
+                          <Badge size="sm" variant="outline">
+                            {app.executionModel}
+                          </Badge>
+                        </Group>
                       </Group>
 
-                      <Button
-                        size="compact-sm"
-                        variant={isEnabled ? 'light' : 'filled'}
-                        disabled={!isReviewApproved}
-                        loading={allowlistMutation.isPending && allowlistMutation.variables?.appId === app.appId}
-                        onClick={() =>
-                          allowlistMutation.mutate({
-                            appId: app.appId,
-                            appName: app.name,
-                            enabled: !isEnabled,
-                          })
-                        }
-                      >
-                        {isEnabled ? 'Disable for Class' : 'Enable for Class'}
-                      </Button>
+                      <Text size="xs" c="dimmed">
+                        {app.appId} • {formatVersionStatus(app)} • {app.developerName}
+                      </Text>
+
+                      <Group gap={8}>
+                        <Button
+                          size="compact-sm"
+                          variant={app.reviewState === 'approved' ? 'filled' : 'light'}
+                          disabled={app.reviewState === 'approved'}
+                          loading={reviewMutation.isPending && reviewMutation.variables?.appId === app.appId}
+                          onClick={() =>
+                            reviewMutation.mutate({
+                              appId: app.appId,
+                              appName: app.name,
+                              reviewState: 'approved',
+                              version: app.pendingVersion || app.version,
+                            })
+                          }
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          size="compact-sm"
+                          variant="light"
+                          color="yellow"
+                          disabled={app.reviewState === 'suspended'}
+                          loading={reviewMutation.isPending && reviewMutation.variables?.appId === app.appId}
+                          onClick={() =>
+                            reviewMutation.mutate({
+                              appId: app.appId,
+                              appName: app.name,
+                              reviewState: 'suspended',
+                              version: app.pendingVersion || app.version,
+                            })
+                          }
+                        >
+                          Suspend
+                        </Button>
+                        <Button
+                          size="compact-sm"
+                          variant="subtle"
+                          color="red"
+                          disabled={app.reviewState === 'rejected'}
+                          loading={reviewMutation.isPending && reviewMutation.variables?.appId === app.appId}
+                          onClick={() =>
+                            reviewMutation.mutate({
+                              appId: app.appId,
+                              appName: app.name,
+                              reviewState: 'rejected',
+                              version: app.pendingVersion || app.version,
+                            })
+                          }
+                        >
+                          Reject
+                        </Button>
+                      </Group>
                     </Stack>
                   </Card>
-                )
-              })}
+                ))}
+
+                {!visibleApps.length ? (
+                  <Text size="sm" c="dimmed">
+                    No apps match the current review filter.
+                  </Text>
+                ) : null}
+              </Stack>
+            </Stack>
+          </Card>
+        ) : null}
+
+        {canUseTeacherWorkspace ? (
+          <Card withBorder radius="md" p="md">
+            <Stack gap="md">
+              <Group gap={8}>
+                <IconChecklist size={16} />
+                <Title order={5}>Teacher Class Allowlist</Title>
+              </Group>
+
+              <TextInput
+                label="Class ID"
+                value={classId}
+                onChange={(event) => setClassId(event.currentTarget.value.trim() || 'demo-class')}
+                description="Manage which approved apps are available to a class without opening a student session."
+              />
+
+              <Stack gap="sm">
+                {apps.map((app) => {
+                  const allowlistEntry = allowlist.find((entry) => entry.appId === app.appId && !entry.disabledAt)
+                  const isEnabled = enabledAppIds.has(app.appId)
+                  const isReviewApproved = app.reviewState === 'approved'
+
+                  return (
+                    <Card key={app.appId} withBorder radius="md" p="sm">
+                      <Stack gap={8}>
+                        <Group justify="space-between" align="flex-start">
+                          <div>
+                            <Text fw={600}>{app.name}</Text>
+                            <Text size="xs" c="dimmed">
+                              {isReviewApproved
+                                ? isEnabled
+                                  ? `Enabled by ${allowlistEntry?.enabledBy || 'teacher'} on ${formatTimestamp(allowlistEntry?.enabledAt)}`
+                                  : `Approved but not enabled for ${classId}.`
+                                : `${app.reviewState} at the platform level.`}
+                            </Text>
+                          </div>
+                          <Badge
+                            size="sm"
+                            variant={isReviewApproved ? 'light' : 'outline'}
+                            color={isReviewApproved ? 'blue' : 'gray'}
+                          >
+                            {app.reviewState}
+                          </Badge>
+                        </Group>
+
+                        <Button
+                          size="compact-sm"
+                          variant={isEnabled ? 'light' : 'filled'}
+                          disabled={!isReviewApproved}
+                          loading={allowlistMutation.isPending && allowlistMutation.variables?.appId === app.appId}
+                          onClick={() =>
+                            allowlistMutation.mutate({
+                              appId: app.appId,
+                              appName: app.name,
+                              enabled: !isEnabled,
+                            })
+                          }
+                        >
+                          {isEnabled ? 'Disable for Class' : 'Enable for Class'}
+                        </Button>
+                      </Stack>
+                    </Card>
+                  )
+                })}
+              </Stack>
+            </Stack>
+          </Card>
+        ) : null}
+      </SimpleGrid>
+
+      {canUseAdminWorkspace ? (
+        <Card withBorder radius="md" p="md">
+          <Stack gap="md">
+            <Group gap={8}>
+              <IconHistory size={16} />
+              <Title order={5}>Recent Review History</Title>
+            </Group>
+            <Stack gap="sm">
+              {reviewHistory.length ? (
+                reviewHistory.map((action) => (
+                  <Card key={`${action.appId}-${action.timestamp}-${action.action}`} withBorder radius="md" p="sm">
+                    <Group justify="space-between" align="flex-start">
+                      <div>
+                        <Text fw={600}>
+                          {action.appId} • {action.action}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          Reviewer {action.reviewerId} • v{action.version} • {formatTimestamp(action.timestamp)}
+                        </Text>
+                        {action.notes ? (
+                          <Text size="sm" mt={6}>
+                            {action.notes}
+                          </Text>
+                        ) : null}
+                      </div>
+                      <Badge size="sm" variant="outline">
+                        {action.action}
+                      </Badge>
+                    </Group>
+                  </Card>
+                ))
+              ) : (
+                <Text size="sm" c="dimmed">
+                  No review actions recorded yet.
+                </Text>
+              )}
             </Stack>
           </Stack>
         </Card>
-      </SimpleGrid>
-
-      <Card withBorder radius="md" p="md">
-        <Stack gap="md">
-          <Group gap={8}>
-            <IconHistory size={16} />
-            <Title order={5}>Recent Review History</Title>
-          </Group>
-          <Stack gap="sm">
-            {reviewHistory.length ? (
-              reviewHistory.map((action) => (
-                <Card key={`${action.appId}-${action.timestamp}-${action.action}`} withBorder radius="md" p="sm">
-                  <Group justify="space-between" align="flex-start">
-                    <div>
-                      <Text fw={600}>
-                        {action.appId} • {action.action}
-                      </Text>
-                      <Text size="xs" c="dimmed">
-                        Reviewer {action.reviewerId} • v{action.version} • {formatTimestamp(action.timestamp)}
-                      </Text>
-                      {action.notes ? (
-                        <Text size="sm" mt={6}>
-                          {action.notes}
-                        </Text>
-                      ) : null}
-                    </div>
-                    <Badge size="sm" variant="outline">
-                      {action.action}
-                    </Badge>
-                  </Group>
-                </Card>
-              ))
-            ) : (
-              <Text size="sm" c="dimmed">
-                No review actions recorded yet.
-              </Text>
-            )}
-          </Stack>
-        </Stack>
-      </Card>
+      ) : null}
     </Stack>
   )
 }
