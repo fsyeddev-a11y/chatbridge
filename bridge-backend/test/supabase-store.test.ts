@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
   buildAppContextSnapshotRows,
+  createSupabaseBridgeStore,
   getMissingSeedAllowlistEntries,
   getMissingSeedRegistryEntries,
 } from '../src/supabase-store.js'
@@ -21,6 +22,114 @@ function createSelectClient(rows: unknown[]) {
               }
             },
           }
+        },
+      }
+    },
+  } as never
+}
+
+function createUserBootstrapClient(operationLog: string[]) {
+  const userProfiles = new Map<string, { user_id: string; email: string | null; role: string; created_at: number; updated_at: number }>()
+  const userRoles = new Map<string, Array<{ id: string; user_id: string; role: string; assigned_by: string | null; assigned_at: number; revoked_at: number | null }>>()
+  const classMemberships = new Map<
+    string,
+    Array<{ id: string; class_id: string; user_id: string; membership_role: 'teacher' | 'student'; created_at: number; removed_at: number | null }>
+  >()
+
+  const seededApps = [{ app_id: 'chess' }, { app_id: 'weather' }, { app_id: 'google-classroom' }]
+  const seededAllowlist = [
+    { id: 'demo-class:chess' },
+    { id: 'demo-class:weather' },
+    { id: 'demo-class:google-classroom' },
+  ]
+  const seededClasses = [{ id: 'demo-class' }]
+
+  return {
+    from(table: string) {
+      return {
+        select() {
+          const state: Record<string, unknown> = {}
+
+          const builder = {
+            eq(column: string, value: unknown) {
+              state[column] = value
+              return builder
+            },
+            is(column: string, value: unknown) {
+              state[column] = value
+              return builder
+            },
+            in(column: string, values: unknown[]) {
+              state[column] = values
+              return builder
+            },
+            returns() {
+              if (table === 'apps') {
+                return Promise.resolve({ data: seededApps, error: null })
+              }
+              if (table === 'class_allowlists') {
+                return Promise.resolve({ data: seededAllowlist, error: null })
+              }
+              if (table === 'classes') {
+                return Promise.resolve({ data: seededClasses, error: null })
+              }
+              if (table === 'user_roles') {
+                return Promise.resolve({ data: userRoles.get(String(state.user_id)) || [], error: null })
+              }
+              if (table === 'class_memberships') {
+                return Promise.resolve({ data: classMemberships.get(String(state.user_id)) || [], error: null })
+              }
+              return Promise.resolve({ data: [], error: null })
+            },
+            maybeSingle() {
+              if (table === 'user_profiles') {
+                return Promise.resolve({ data: userProfiles.get(String(state.user_id)) || null, error: null })
+              }
+              return Promise.resolve({ data: null, error: null })
+            },
+          }
+
+          return builder
+        },
+        upsert(payload: Record<string, unknown> | Record<string, unknown>[]) {
+          operationLog.push(`${table}.upsert`)
+
+          if (table === 'user_profiles') {
+            const row = payload as { user_id: string; email: string | null; role: string; created_at: number; updated_at: number }
+            userProfiles.set(row.user_id, row)
+          } else if (table === 'user_roles') {
+            const rows = Array.isArray(payload) ? payload : [payload]
+            for (const row of rows as Array<{
+              id: string
+              user_id: string
+              role: string
+              assigned_by: string | null
+              assigned_at: number
+              revoked_at: number | null
+            }>) {
+              const existing = userRoles.get(row.user_id) || []
+              userRoles.set(
+                row.user_id,
+                [...existing.filter((entry) => entry.id !== row.id), row]
+              )
+            }
+          } else if (table === 'class_memberships') {
+            const row = payload as {
+              id: string
+              class_id: string
+              user_id: string
+              membership_role: 'teacher' | 'student'
+              created_at: number
+              removed_at: number | null
+            }
+            const existing = classMemberships.get(row.user_id) || []
+            classMemberships.set(
+              row.user_id,
+              [...existing.filter((entry) => entry.id !== row.id), row]
+            )
+          }
+
+          return Promise.resolve({ error: null })
         },
       }
     },
@@ -169,5 +278,54 @@ describe('supabase seed bootstrap helpers', () => {
       last_error: 'Recovered from disconnect.',
       captured_at: 123456,
     })
+  })
+
+  it('creates the user profile row before role and class membership bootstrap writes', async () => {
+    const originalAdminEmails = process.env.CHATBRIDGE_ADMIN_EMAILS
+    const originalTeacherEmails = process.env.CHATBRIDGE_TEACHER_EMAILS
+    const originalDeveloperEmails = process.env.CHATBRIDGE_DEVELOPER_EMAILS
+    const operationLog: string[] = []
+
+    delete process.env.CHATBRIDGE_ADMIN_EMAILS
+    delete process.env.CHATBRIDGE_TEACHER_EMAILS
+    delete process.env.CHATBRIDGE_DEVELOPER_EMAILS
+
+    try {
+      const store = createSupabaseBridgeStore(createUserBootstrapClient(operationLog))
+      const profile = await store.getOrCreateUserProfile({
+        userId: 'student-1',
+        email: 'student@example.com',
+      })
+
+      assert.equal(profile.role, 'student')
+      assert.deepEqual(profile.roles, ['student'])
+      const userProfileWriteIndex = operationLog.indexOf('user_profiles.upsert')
+      const userRoleWriteIndex = operationLog.indexOf('user_roles.upsert')
+      const classMembershipWriteIndex = operationLog.indexOf('class_memberships.upsert')
+
+      assert.notEqual(userProfileWriteIndex, -1)
+      assert.notEqual(userRoleWriteIndex, -1)
+      assert.notEqual(classMembershipWriteIndex, -1)
+      assert.ok(userProfileWriteIndex < userRoleWriteIndex)
+      assert.ok(userProfileWriteIndex < classMembershipWriteIndex)
+    } finally {
+      if (originalAdminEmails === undefined) {
+        delete process.env.CHATBRIDGE_ADMIN_EMAILS
+      } else {
+        process.env.CHATBRIDGE_ADMIN_EMAILS = originalAdminEmails
+      }
+
+      if (originalTeacherEmails === undefined) {
+        delete process.env.CHATBRIDGE_TEACHER_EMAILS
+      } else {
+        process.env.CHATBRIDGE_TEACHER_EMAILS = originalTeacherEmails
+      }
+
+      if (originalDeveloperEmails === undefined) {
+        delete process.env.CHATBRIDGE_DEVELOPER_EMAILS
+      } else {
+        process.env.CHATBRIDGE_DEVELOPER_EMAILS = originalDeveloperEmails
+      }
+    }
   })
 })

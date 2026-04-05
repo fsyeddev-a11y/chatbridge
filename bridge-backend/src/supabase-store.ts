@@ -289,13 +289,12 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
       await ensureSeeded()
       const existing = await this.getUserProfile(user.userId)
       const now = Date.now()
-      const roles = await ensureDefaultUserRoles(user.userId, user.email ?? existing?.email)
-      await ensureDefaultClassMembership(user.userId, roles)
+      const defaultRoles = resolveDefaultUserRoles(user.email ?? existing?.email)
 
       const row: SupabaseUserProfileRow = {
         user_id: user.userId,
         email: user.email ?? existing?.email ?? null,
-        role: selectPrimaryUserRole(roles),
+        role: selectPrimaryUserRole(existing?.roles?.length ? existing.roles : defaultRoles),
         created_at: existing?.createdAt ?? now,
         updated_at: now,
       }
@@ -306,10 +305,13 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
         throw error
       }
 
+      const roles = await ensureDefaultUserRoles(user.userId, row.email ?? existing?.email ?? undefined)
+      await ensureDefaultClassMembership(user.userId, roles)
+
       return {
         userId: user.userId,
         email: row.email ?? undefined,
-        role: row.role,
+        role: selectPrimaryUserRole(roles),
         roles,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
