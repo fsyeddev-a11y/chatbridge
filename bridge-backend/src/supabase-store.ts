@@ -470,24 +470,6 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
       const migratedManifest = migrateManifest(manifest)
       const versionId = buildVersionRecordId(manifest.appId, manifest.version)
 
-      const versionRow: SupabaseAppVersionRow = {
-        id: versionId,
-        app_id: manifest.appId,
-        version: manifest.version,
-        review_state: 'pending',
-        submitted_at: now,
-        reviewed_at: null,
-        review_notes: null,
-        owner_user_id: owner?.userId ?? existing?.ownerUserId ?? null,
-        owner_email: owner?.email ?? existing?.ownerEmail ?? null,
-        manifest: migratedManifest,
-      }
-
-      const { error: versionError } = await client.from('app_versions').upsert(versionRow, { onConflict: 'app_id,version' })
-      if (versionError) {
-        throw versionError
-      }
-
       const currentActiveVersion = existing?.activeVersion ?? null
       const row: SupabaseBridgeStoreRow = {
         app_id: manifest.appId,
@@ -504,6 +486,24 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
       const { error: appError } = await client.from('apps').upsert(row, { onConflict: 'app_id' })
       if (appError) {
         throw appError
+      }
+
+      const versionRow: SupabaseAppVersionRow = {
+        id: versionId,
+        app_id: manifest.appId,
+        version: manifest.version,
+        review_state: 'pending',
+        submitted_at: now,
+        reviewed_at: null,
+        review_notes: null,
+        owner_user_id: owner?.userId ?? existing?.ownerUserId ?? null,
+        owner_email: owner?.email ?? existing?.ownerEmail ?? null,
+        manifest: migratedManifest,
+      }
+
+      const { error: versionError } = await client.from('app_versions').upsert(versionRow, { onConflict: 'app_id,version' })
+      if (versionError) {
+        throw versionError
       }
 
       return await this.getRegistryEntry(manifest.appId) as AppRegistryEntry

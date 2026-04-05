@@ -136,6 +136,234 @@ function createUserBootstrapClient(operationLog: string[]) {
   } as never
 }
 
+function createRegisterAppClient(operationLog: string[]) {
+  const apps = new Map<string, Record<string, unknown>>([
+    [
+      'chess',
+      {
+        app_id: 'chess',
+        review_state: 'approved',
+        registered_at: 1,
+        reviewed_at: 1,
+        review_notes: null,
+        owner_user_id: 'system-demo',
+        owner_email: 'demo@chatbridge.local',
+        active_version: '1.0.0',
+        manifest: {
+          appId: 'chess',
+          name: 'Chess Coach',
+          version: '1.0.0',
+          description: 'Chess',
+          developerName: 'Demo',
+          executionModel: 'iframe',
+          allowedOrigins: ['https://apps.example.com'],
+          authType: 'none',
+          subjectTags: ['Strategy'],
+          gradeBand: '3-12',
+          llmSafeFields: ['fen'],
+          tools: [{ name: 'chess_tool', description: 'Chess tool' }],
+        },
+      },
+    ],
+    [
+      'weather',
+      {
+        app_id: 'weather',
+        review_state: 'approved',
+        registered_at: 1,
+        reviewed_at: 1,
+        review_notes: null,
+        owner_user_id: 'system-demo',
+        owner_email: 'demo@chatbridge.local',
+        active_version: '1.0.0',
+        manifest: {
+          appId: 'weather',
+          name: 'Weather Dashboard',
+          version: '1.0.0',
+          description: 'Weather',
+          developerName: 'Demo',
+          executionModel: 'iframe',
+          launchUrl: 'https://weather.example.com',
+          allowedOrigins: ['https://weather.example.com'],
+          authType: 'none',
+          subjectTags: ['Science'],
+          gradeBand: 'K-12',
+          llmSafeFields: ['location'],
+          tools: [{ name: 'weather_tool', description: 'Weather tool' }],
+        },
+      },
+    ],
+    [
+      'google-classroom',
+      {
+        app_id: 'google-classroom',
+        review_state: 'approved',
+        registered_at: 1,
+        reviewed_at: 1,
+        review_notes: null,
+        owner_user_id: 'system-demo',
+        owner_email: 'demo@chatbridge.local',
+        active_version: '1.0.0',
+        manifest: {
+          appId: 'google-classroom',
+          name: 'Google Classroom Assistant',
+          version: '1.0.0',
+          description: 'Classroom',
+          developerName: 'Demo',
+          executionModel: 'iframe',
+          allowedOrigins: ['https://classroom.example.com'],
+          authType: 'oauth2',
+          subjectTags: ['Classroom'],
+          gradeBand: '3-12',
+          llmSafeFields: ['courseCount'],
+          tools: [{ name: 'classroom_tool', description: 'Classroom tool' }],
+        },
+      },
+    ],
+  ])
+  const appVersions = new Map<string, Record<string, unknown>>([
+    [
+      'chess:1.0.0',
+      {
+        id: 'chess:1.0.0',
+        app_id: 'chess',
+        version: '1.0.0',
+        review_state: 'approved',
+        submitted_at: 1,
+        reviewed_at: 1,
+        review_notes: null,
+        owner_user_id: 'system-demo',
+        owner_email: 'demo@chatbridge.local',
+        manifest: apps.get('chess')?.manifest,
+      },
+    ],
+    [
+      'weather:1.0.0',
+      {
+        id: 'weather:1.0.0',
+        app_id: 'weather',
+        version: '1.0.0',
+        review_state: 'approved',
+        submitted_at: 1,
+        reviewed_at: 1,
+        review_notes: null,
+        owner_user_id: 'system-demo',
+        owner_email: 'demo@chatbridge.local',
+        manifest: apps.get('weather')?.manifest,
+      },
+    ],
+    [
+      'google-classroom:1.0.0',
+      {
+        id: 'google-classroom:1.0.0',
+        app_id: 'google-classroom',
+        version: '1.0.0',
+        review_state: 'approved',
+        submitted_at: 1,
+        reviewed_at: 1,
+        review_notes: null,
+        owner_user_id: 'system-demo',
+        owner_email: 'demo@chatbridge.local',
+        manifest: apps.get('google-classroom')?.manifest,
+      },
+    ],
+  ])
+
+  return {
+    from(table: string) {
+      const state: Record<string, unknown> = {}
+
+      const createSelectBuilder = () => ({
+        eq(column: string, value: unknown) {
+          state[column] = value
+          return this
+        },
+        is(column: string, value: unknown) {
+          state[column] = value
+          return this
+        },
+        in(column: string, values: unknown[]) {
+          state[column] = values
+          return this
+        },
+        order() {
+          return this
+        },
+        returns() {
+          if (table === 'classes') {
+            return Promise.resolve({ data: [{ id: 'demo-class' }], error: null })
+          }
+          if (table === 'class_allowlists') {
+            return Promise.resolve({
+              data: [
+                { id: 'demo-class:chess' },
+                { id: 'demo-class:weather' },
+                { id: 'demo-class:google-classroom' },
+              ],
+              error: null,
+            })
+          }
+          if (table === 'apps') {
+            if (Array.isArray(state.app_id)) {
+              const rows = (state.app_id as string[])
+                .map((appId) => apps.get(appId))
+                .filter(Boolean)
+              return Promise.resolve({ data: rows, error: null })
+            }
+            return Promise.resolve({ data: [{ app_id: 'chess' }, { app_id: 'weather' }, { app_id: 'google-classroom' }], error: null })
+          }
+          if (table === 'app_versions') {
+            if (Array.isArray(state.id)) {
+              const rows = (state.id as string[])
+                .map((id) => appVersions.get(id))
+                .filter(Boolean)
+              return Promise.resolve({ data: rows, error: null })
+            }
+            if (Array.isArray(state.app_id)) {
+              const appIds = new Set(state.app_id as string[])
+              const rows = [...appVersions.values()].filter((row) => appIds.has(String(row.app_id)))
+              return Promise.resolve({ data: rows, error: null })
+            }
+          }
+          return Promise.resolve({ data: [], error: null })
+        },
+        maybeSingle() {
+          if (table === 'apps') {
+            return Promise.resolve({ data: apps.get(String(state.app_id)) || null, error: null })
+          }
+          return Promise.resolve({ data: null, error: null })
+        },
+      })
+
+      return {
+        select() {
+          return createSelectBuilder()
+        },
+        upsert(payload: Record<string, unknown> | Record<string, unknown>[]) {
+          operationLog.push(`${table}.upsert`)
+
+          if (table === 'apps') {
+            const row = payload as Record<string, unknown>
+            apps.set(String(row.app_id), row)
+            return Promise.resolve({ error: null })
+          }
+
+          if (table === 'app_versions') {
+            const row = payload as Record<string, unknown>
+            if (!apps.has(String(row.app_id))) {
+              return Promise.resolve({ error: new Error('insert or update on table "app_versions" violates foreign key constraint') })
+            }
+            appVersions.set(String(row.id), row)
+            return Promise.resolve({ error: null })
+          }
+
+          return Promise.resolve({ error: null })
+        },
+      }
+    },
+  } as never
+}
+
 describe('supabase seed bootstrap helpers', () => {
   it('backfills only missing default registry entries when the table is partially populated', async () => {
     const seedEntries: AppRegistryEntry[] = [
@@ -327,5 +555,46 @@ describe('supabase seed bootstrap helpers', () => {
         process.env.CHATBRIDGE_DEVELOPER_EMAILS = originalDeveloperEmails
       }
     }
+  })
+
+  it('creates the app row before the app version row when registering a brand-new app', async () => {
+    const operationLog: string[] = []
+    const store = createSupabaseBridgeStore(createRegisterAppClient(operationLog))
+
+    const app = await store.registerApp(
+      {
+        appId: 'story-builder',
+        name: 'AI Story Builder',
+        version: '1.0.0',
+        description: 'Structured story building for students.',
+        developerName: 'Developer',
+        executionModel: 'iframe',
+        allowedOrigins: ['https://apps.example.com'],
+        authType: 'none',
+        subjectTags: ['ELA'],
+        gradeBand: '3-8',
+        llmSafeFields: ['storyTitle'],
+        tools: [
+          {
+            name: 'chatbridge_story_builder_open',
+            description: 'Open story builder.',
+          },
+        ],
+      },
+      {
+        userId: 'developer-1',
+        email: 'developer@example.com',
+      }
+    )
+
+    const appWriteIndex = operationLog.lastIndexOf('apps.upsert')
+    const versionWriteIndex = operationLog.lastIndexOf('app_versions.upsert')
+    const registeredManifest = app.manifest as { appId: string }
+
+    assert.equal(registeredManifest.appId, 'story-builder')
+    assert.equal(app.ownerUserId, 'developer-1')
+    assert.notEqual(appWriteIndex, -1)
+    assert.notEqual(versionWriteIndex, -1)
+    assert.ok(appWriteIndex < versionWriteIndex)
   })
 })
