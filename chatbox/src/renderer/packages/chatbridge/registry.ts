@@ -276,23 +276,13 @@ async function invalidateChatBridgeQueries(classId?: string) {
 }
 
 export async function fetchChatBridgeApps(): Promise<ChatBridgeAppDefinition[]> {
-  try {
-    const response = await fetchJson<RegistryApiResponse>('/api/registry/apps')
-    return normalizeRegistryEntries(response.apps)
-  } catch (error) {
-    console.warn('Falling back to local ChatBridge registry', error)
-    return getFallbackRegistry()
-  }
+  const response = await fetchJson<RegistryApiResponse>('/api/registry/apps')
+  return normalizeRegistryEntries(response.apps)
 }
 
 export async function fetchApprovedChatBridgeAppsForClass(classId: string): Promise<ChatBridgeAppDefinition[]> {
-  try {
-    const response = await fetchJson<ClassAppsApiResponse>(`/api/classes/${classId}/apps`)
-    return normalizeRegistryEntries(response.apps)
-  } catch (error) {
-    console.warn('Falling back to local class-approved ChatBridge apps', error)
-    return getFallbackRegistry().filter((app) => app.reviewState === 'approved' && app.enabledClassIds.includes(classId))
-  }
+  const response = await fetchJson<ClassAppsApiResponse>(`/api/classes/${classId}/apps`)
+  return normalizeRegistryEntries(response.apps)
 }
 
 export async function fetchChatBridgeAppById(appId: string | undefined): Promise<ChatBridgeAppDefinition | undefined> {
@@ -308,7 +298,7 @@ export async function fetchChatBridgeAppById(appId: string | undefined): Promise
     })
     return allApps.find((app) => app.appId === appId)
   } catch {
-    return getFallbackAppById(appId)
+    return undefined
   }
 }
 
@@ -324,13 +314,8 @@ export function useChatBridgeApps() {
 }
 
 export async function fetchDeveloperChatBridgeApps(): Promise<ChatBridgeAppDefinition[]> {
-  try {
-    const response = await fetchJson<RegistryApiResponse>('/api/developer/apps')
-    return normalizeRegistryEntries(response.apps)
-  } catch (error) {
-    console.warn('Falling back to empty developer ChatBridge apps', error)
-    return []
-  }
+  const response = await fetchJson<RegistryApiResponse>('/api/developer/apps')
+  return normalizeRegistryEntries(response.apps)
 }
 
 export function useDeveloperChatBridgeApps() {
@@ -345,13 +330,8 @@ export function useDeveloperChatBridgeApps() {
 }
 
 export async function fetchDeveloperChatBridgeReviewActions(): Promise<ChatBridgeReviewAction[]> {
-  try {
-    const response = await fetchJson<ReviewActionsApiResponse>('/api/developer/review-actions')
-    return response.actions
-  } catch (error) {
-    console.warn('Falling back to empty developer ChatBridge review history', error)
-    return []
-  }
+  const response = await fetchJson<ReviewActionsApiResponse>('/api/developer/review-actions')
+  return response.actions
 }
 
 export function useDeveloperChatBridgeReviewActions() {
@@ -377,20 +357,8 @@ export function useApprovedChatBridgeAppsForClass(classId: string) {
 }
 
 export async function fetchChatBridgeAllowlist(classId: string): Promise<ChatBridgeAllowlistEntry[]> {
-  try {
-    const response = await fetchJson<ClassAllowlistApiResponse>(`/api/classes/${classId}/allowlist`)
-    return response.allowlist
-  } catch (error) {
-    console.warn('Falling back to local class allowlist state', error)
-    return getFallbackRegistry()
-      .filter((app) => app.enabledClassIds.includes(classId))
-      .map((app) => ({
-        classId,
-        appId: app.appId,
-        enabledBy: 'teacher-demo',
-        enabledAt: 0,
-      }))
-  }
+  const response = await fetchJson<ClassAllowlistApiResponse>(`/api/classes/${classId}/allowlist`)
+  return response.allowlist
 }
 
 export function useChatBridgeAllowlist(classId: string) {
@@ -405,13 +373,8 @@ export function useChatBridgeAllowlist(classId: string) {
 }
 
 export async function fetchChatBridgeReviewActions(): Promise<ChatBridgeReviewAction[]> {
-  try {
-    const response = await fetchJson<ReviewActionsApiResponse>('/api/review-actions')
-    return response.actions
-  } catch (error) {
-    console.warn('Falling back to empty ChatBridge review history', error)
-    return []
-  }
+  const response = await fetchJson<ReviewActionsApiResponse>('/api/review-actions')
+  return response.actions
 }
 
 export function useChatBridgeReviewActions() {

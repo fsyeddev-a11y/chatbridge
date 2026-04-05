@@ -1,6 +1,6 @@
-import { ActionIcon, Badge, Button, Card, Group, Stack, Text } from '@mantine/core'
+import { ActionIcon, Alert, Badge, Button, Card, Group, Stack, Text } from '@mantine/core'
 import type { Session } from '@shared/types'
-import { IconApps, IconChevronDown, IconChevronRight, IconExternalLink, IconLock } from '@tabler/icons-react'
+import { IconAlertCircle, IconApps, IconChevronDown, IconChevronRight, IconExternalLink, IconLock } from '@tabler/icons-react'
 import { useMemo, useState } from 'react'
 import { revokeChatBridgeOAuthToken, startChatBridgeOAuthFlow, useChatBridgeOAuthStatus } from '@/packages/chatbridge/oauth'
 import { type ChatBridgeAppDefinition, useApprovedChatBridgeAppsForClass } from '@/packages/chatbridge/registry'
@@ -117,7 +117,7 @@ function ChatBridgeShelfCard({ app, session, isActive }: ChatBridgeShelfCardProp
 
 export default function ChatBridgeShelf({ session }: ChatBridgeShelfProps) {
   const bridgeState = useMemo(() => getSessionBridgeState(session), [session])
-  const { data: apps = [] } = useApprovedChatBridgeAppsForClass(bridgeState.activeClassId)
+  const { data: apps = [], error } = useApprovedChatBridgeAppsForClass(bridgeState.activeClassId)
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -147,16 +147,22 @@ export default function ChatBridgeShelf({ session }: ChatBridgeShelfProps) {
         </Group>
 
         {expanded ? (
-          <div className="grid gap-2 lg:grid-cols-3">
-            {apps.map((app) => (
-              <ChatBridgeShelfCard
-                key={app.appId}
-                app={app}
-                session={session}
-                isActive={bridgeState.activeAppId === app.appId}
-              />
-            ))}
-          </div>
+          error ? (
+            <Alert radius="md" icon={<IconAlertCircle size={16} />} color="red" variant="light">
+              ChatBridge apps could not be loaded from the backend right now.
+            </Alert>
+          ) : (
+            <div className="grid gap-2 lg:grid-cols-3">
+              {apps.map((app) => (
+                <ChatBridgeShelfCard
+                  key={app.appId}
+                  app={app}
+                  session={session}
+                  isActive={bridgeState.activeAppId === app.appId}
+                />
+              ))}
+            </div>
+          )
         ) : null}
       </Stack>
     </Card>

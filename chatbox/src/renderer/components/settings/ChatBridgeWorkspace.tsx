@@ -83,11 +83,11 @@ export default function ChatBridgeWorkspace() {
   const [errorMessage, setErrorMessage] = useState<string>()
   const [developerManifestJson, setDeveloperManifestJson] = useState(JSON.stringify(DEMO_STORY_BUILDER_MANIFEST, null, 2))
 
-  const { data: apps = [] } = useChatBridgeApps()
-  const { data: allowlist = [] } = useChatBridgeAllowlist(classId)
-  const { data: reviewActions = [] } = useChatBridgeReviewActions()
-  const { data: developerApps = [] } = useDeveloperChatBridgeApps()
-  const { data: developerReviewActions = [] } = useDeveloperChatBridgeReviewActions()
+  const { data: apps = [], error: appsError } = useChatBridgeApps()
+  const { data: allowlist = [], error: allowlistError } = useChatBridgeAllowlist(classId)
+  const { data: reviewActions = [], error: reviewActionsError } = useChatBridgeReviewActions()
+  const { data: developerApps = [], error: developerAppsError } = useDeveloperChatBridgeApps()
+  const { data: developerReviewActions = [], error: developerReviewActionsError } = useDeveloperChatBridgeReviewActions()
 
   const enabledAppIds = useMemo(
     () => new Set(allowlist.filter((entry) => !entry.disabledAt).map((entry) => entry.appId)),
@@ -195,6 +195,11 @@ export default function ChatBridgeWorkspace() {
 
       {statusMessage ? <Alert color="green">{statusMessage}</Alert> : null}
       {errorMessage ? <Alert color="red">{errorMessage}</Alert> : null}
+      {appsError || allowlistError || reviewActionsError || developerAppsError || developerReviewActionsError ? (
+        <Alert color="red">
+          ChatBridge backend data could not be loaded. This workspace no longer falls back to local mock state.
+        </Alert>
+      ) : null}
 
       <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
         <Card withBorder radius="md" p="md">
