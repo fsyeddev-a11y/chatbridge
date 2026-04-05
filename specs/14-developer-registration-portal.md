@@ -2,7 +2,7 @@
 
 ## Dependencies
 
-- Depends on: `01-registry-and-manifest.md`, `04-approval-and-governance.md`, `09-auth-and-access-control.md`, `12-teacher-admin-surfaces.md`
+- Depends on: `01-registry-and-manifest.md`, `04-approval-and-governance.md`, `09-auth-and-access-control.md`, `12-teacher-admin-surfaces.md`, `17-role-based-authorization-and-class-membership.md`
 - Informs: `06-developer-sdk.md`
 
 ## Status
@@ -15,7 +15,7 @@
   - version-safe resubmission flow
   - explicit approved-vs-pending version coexistence
 - Not implemented yet:
-  - developer-facing auth
+  - dedicated developer-facing auth and role assignment
   - versioned rollout, rollback, and migration guidance for developers
 
 ## Context

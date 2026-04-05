@@ -2,7 +2,7 @@
 
 ## Dependencies
 
-- Depends on: `04-approval-and-governance.md`, `09-auth-and-access-control.md`, `11-persistence-and-app-sessions.md`
+- Depends on: `04-approval-and-governance.md`, `09-auth-and-access-control.md`, `11-persistence-and-app-sessions.md`, `17-role-based-authorization-and-class-membership.md`
 - Informs: `14-developer-registration-portal.md`
 
 ## Status
@@ -12,6 +12,7 @@
   - session page link-out to the canonical ChatBridge workspace
 - Not implemented yet:
   - role-backed navigation and access control in production UI
+  - class-scoped teacher views based on real class memberships
 
 ## Context
 

@@ -20,6 +20,7 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [x] `14` developer registration portal
 - [x] `15` rate limiting and abuse controls
 - [x] `16` deployment and runtime optimization
+- [x] `17` role-based authorization and class membership
 
 ## Implementation Progress Checklist
 
@@ -33,6 +34,9 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [x] `11` Backend-owned app/session reconciliation
 - [x] `11` App-context snapshot persistence
 - [x] `09` User profile and role foundation
+- [ ] `17` Multi-role backend authorization and route enforcement
+- [ ] `17` Class membership and role-aware app/session access
+- [ ] `17` Role-aware frontend navigation and surfaces
 - [x] `12` Dedicated teacher/admin surfaces
 - [x] `03` OAuth connect/status/revoke foundation
 - [ ] `13` Additional real apps beyond Weather
@@ -73,6 +77,8 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
   - Moves registry, allowlists, audit, and app session state to durable backend storage.
 - [15-rate-limiting-and-abuse-controls.md](/Users/fsyed/Documents/ChatBridge/specs/15-rate-limiting-and-abuse-controls.md)
   - Protects the backend generation and app runtime surface from abuse.
+- [17-role-based-authorization-and-class-membership.md](/Users/fsyed/Documents/ChatBridge/specs/17-role-based-authorization-and-class-membership.md)
+  - Defines multi-role authorization, class membership, and route enforcement beyond basic auth.
 
 ### Governance, Product Surfaces, and Ecosystem
 
@@ -96,14 +102,15 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 ## Recommended Build Sequence
 
 1. Auth and access control
-2. Backend-owned generation
-3. Durable persistence and app sessions
-4. Rate limiting and abuse controls
-5. Teacher/admin surfaces
-6. OAuth orchestration
-7. Real app integrations beyond Weather
-8. Developer registration portal
-9. Deployment/runtime optimization
+2. Durable persistence and app sessions
+3. Role-based authorization and class membership
+4. Backend-owned generation
+5. Rate limiting and abuse controls
+6. Teacher/admin surfaces
+7. OAuth orchestration
+8. Real app integrations beyond Weather
+9. Developer registration portal
+10. Deployment/runtime optimization
 
 ## Notes
 

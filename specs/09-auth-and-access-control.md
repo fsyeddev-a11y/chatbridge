@@ -3,7 +3,7 @@
 ## Dependencies
 
 - Depends on: none
-- Informs: `10-backend-owned-generation-and-streaming.md`, `11-persistence-and-app-sessions.md`, `12-teacher-admin-surfaces.md`, `14-developer-registration-portal.md`, `15-rate-limiting-and-abuse-controls.md`
+- Informs: `10-backend-owned-generation-and-streaming.md`, `11-persistence-and-app-sessions.md`, `12-teacher-admin-surfaces.md`, `14-developer-registration-portal.md`, `15-rate-limiting-and-abuse-controls.md`, `17-role-based-authorization-and-class-membership.md`
 
 ## Status
 
@@ -18,6 +18,7 @@
   - role-backed route enforcement for privileged actions
   - school/org enrollment model
   - separate teacher, student, admin, and developer account experiences
+  - detailed multi-role and class-membership enforcement, specified in `17-role-based-authorization-and-class-membership.md`
 
 ## Context
 
