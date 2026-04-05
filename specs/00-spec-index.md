@@ -41,6 +41,7 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [x] `18` School hierarchy schema and scoped memberships
 - [x] `18` School-level app approval
 - [x] `18` Class-level activation constrained by school approval
+- [x] `18` School-admin and teacher scoped settings workspace
 - [ ] `18` Student shelf and tool exposure derived from school + class scope
 - [x] `12` Dedicated teacher/admin surfaces
 - [x] `03` OAuth connect/status/revoke foundation

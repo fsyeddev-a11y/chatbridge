@@ -24,6 +24,14 @@ export type ChatBridgeAllowlistEntry = {
   disabledAt?: number
 }
 
+export type ChatBridgeSchoolAllowlistEntry = {
+  schoolId: string
+  appId: string
+  enabledBy: string
+  enabledAt: number
+  disabledAt?: number
+}
+
 export type ChatBridgeReviewAction = {
   appId: string
   version: string
@@ -60,6 +68,11 @@ type ClassAllowlistApiResponse = {
   allowlist: ChatBridgeAllowlistEntry[]
 }
 
+type SchoolAllowlistApiResponse = {
+  schoolId: string
+  allowlist: ChatBridgeSchoolAllowlistEntry[]
+}
+
 type RegistryAppResponse = {
   app: {
     manifest: BridgeAppManifest
@@ -87,8 +100,22 @@ export type ChatBridgeWorkspaceUser = {
     createdAt: number
     updatedAt: number
   }
+  schools: Array<{
+    schoolId: string
+    name: string
+    createdAt: number
+    updatedAt: number
+  }>
+  schoolMemberships: Array<{
+    schoolId: string
+    userId: string
+    membershipRole: 'school_admin' | 'teacher' | 'student'
+    createdAt: number
+    removedAt?: number
+  }>
   classes: Array<{
     classId: string
+    schoolId?: string
     name: string
     organizationId?: string
     externalRef?: string
@@ -96,6 +123,13 @@ export type ChatBridgeWorkspaceUser = {
     updatedAt: number
   }>
   memberships: Array<{
+    classId: string
+    userId: string
+    membershipRole: 'teacher' | 'student'
+    createdAt: number
+    removedAt?: number
+  }>
+  classMemberships?: Array<{
     classId: string
     userId: string
     membershipRole: 'teacher' | 'student'
@@ -120,6 +154,7 @@ export const ChatBridgeQueryKeys = {
   ChatBridgeDeveloperApps: ['chatbridge', 'developer-apps'],
   ChatBridgeDeveloperReviewActions: ['chatbridge', 'developer-review-actions'],
   ChatBridgeClassApps: (classId: string) => ['chatbridge', 'class-apps', classId],
+  ChatBridgeSchoolAllowlist: (schoolId: string) => ['chatbridge', 'school-allowlist', schoolId],
   ChatBridgeClassAllowlist: (classId: string) => ['chatbridge', 'class-allowlist', classId],
   ChatBridgeReviewActions: ['chatbridge', 'review-actions'],
 }
@@ -183,14 +218,19 @@ async function sendJson<T>(path: string, method: 'POST', body: Record<string, un
   return (await response.json()) as T
 }
 
-async function invalidateChatBridgeQueries(classId?: string) {
+async function invalidateChatBridgeQueries(options?: { classId?: string; schoolId?: string }) {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: ['chatbridge'] }),
     queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeDeveloperApps }),
     queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeDeveloperReviewActions }),
-    classId ? queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeClassApps(classId) }) : Promise.resolve(),
-    classId
-      ? queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeClassAllowlist(classId) })
+    options?.classId
+      ? queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeClassApps(options.classId) })
+      : Promise.resolve(),
+    options?.classId
+      ? queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeClassAllowlist(options.classId) })
+      : Promise.resolve(),
+    options?.schoolId
+      ? queryClient.invalidateQueries({ queryKey: ChatBridgeQueryKeys.ChatBridgeSchoolAllowlist(options.schoolId) })
       : Promise.resolve(),
   ])
 }
@@ -307,6 +347,22 @@ export function useChatBridgeAllowlist(classId: string, options?: { enabled?: bo
   })
 }
 
+export async function fetchChatBridgeSchoolAllowlist(schoolId: string): Promise<ChatBridgeSchoolAllowlistEntry[]> {
+  const response = await fetchJson<SchoolAllowlistApiResponse>(`/api/schools/${schoolId}/allowlist`)
+  return response.allowlist
+}
+
+export function useChatBridgeSchoolAllowlist(schoolId: string, options?: { enabled?: boolean }) {
+  const { loading, isAuthenticated } = useSupabaseAuthState()
+
+  return useQuery({
+    queryKey: ChatBridgeQueryKeys.ChatBridgeSchoolAllowlist(schoolId),
+    queryFn: () => fetchChatBridgeSchoolAllowlist(schoolId),
+    staleTime: 30_000,
+    enabled: (options?.enabled ?? true) && !!schoolId && !loading && isAuthenticated,
+  })
+}
+
 export async function fetchChatBridgeReviewActions(): Promise<ChatBridgeReviewAction[]> {
   const response = await fetchJson<ReviewActionsApiResponse>('/api/review-actions')
   return response.actions
@@ -368,12 +424,27 @@ export async function enableChatBridgeAppForClass(classId: string, appId: string
     appId,
     enabledBy,
   })
-  await invalidateChatBridgeQueries(classId)
+  await invalidateChatBridgeQueries({ classId })
 }
 
 export async function disableChatBridgeAppForClass(classId: string, appId: string, enabledBy: string) {
   await sendJson<ClassAllowlistApiResponse>(`/api/classes/${classId}/allowlist/${appId}/disable`, 'POST', {
     enabledBy,
   })
-  await invalidateChatBridgeQueries(classId)
+  await invalidateChatBridgeQueries({ classId })
+}
+
+export async function enableChatBridgeAppForSchool(schoolId: string, appId: string, enabledBy: string) {
+  await sendJson<SchoolAllowlistApiResponse>(`/api/schools/${schoolId}/allowlist`, 'POST', {
+    appId,
+    enabledBy,
+  })
+  await invalidateChatBridgeQueries({ schoolId })
+}
+
+export async function disableChatBridgeAppForSchool(schoolId: string, appId: string, enabledBy: string) {
+  await sendJson<SchoolAllowlistApiResponse>(`/api/schools/${schoolId}/allowlist/${appId}/disable`, 'POST', {
+    enabledBy,
+  })
+  await invalidateChatBridgeQueries({ schoolId })
 }

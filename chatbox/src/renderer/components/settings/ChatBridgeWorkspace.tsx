@@ -4,25 +4,28 @@ import {
   Button,
   Card,
   Group,
+  Select,
   SegmentedControl,
   SimpleGrid,
   Stack,
   Text,
   Textarea,
-  TextInput,
   Title,
 } from '@mantine/core'
 import { useMutation } from '@tanstack/react-query'
 import { IconChecklist, IconHistory, IconShieldCheck, IconSparkles } from '@tabler/icons-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   DEFAULT_REVIEWER_ID,
+  DEFAULT_SCHOOL_ADMIN_ID,
   DEFAULT_TEACHER_ID,
   DEMO_STORY_BUILDER_MANIFEST,
 } from '@/packages/chatbridge/control-plane'
 import {
   disableChatBridgeAppForClass,
+  disableChatBridgeAppForSchool,
   enableChatBridgeAppForClass,
+  enableChatBridgeAppForSchool,
   fetchDeveloperChatBridgeApps,
   registerChatBridgeApp,
   reviewChatBridgeApp,
@@ -30,6 +33,7 @@ import {
   useChatBridgeApps,
   useChatBridgeMe,
   useChatBridgeReviewActions,
+  useChatBridgeSchoolAllowlist,
   useDeveloperChatBridgeReviewActions,
   useDeveloperChatBridgeApps,
 } from '@/packages/chatbridge/registry'
@@ -78,7 +82,8 @@ function formatVersionStatus(app: {
 }
 
 export default function ChatBridgeWorkspace() {
-  const [classId, setClassId] = useState('demo-class')
+  const [schoolId, setSchoolId] = useState('')
+  const [classId, setClassId] = useState('')
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all')
   const [statusMessage, setStatusMessage] = useState<string>()
   const [errorMessage, setErrorMessage] = useState<string>()
@@ -86,15 +91,85 @@ export default function ChatBridgeWorkspace() {
 
   const { data: workspaceUser, error: workspaceUserError, isLoading: workspaceUserLoading } = useChatBridgeMe()
   const effectiveRoles = workspaceUser?.user.roles || []
+  const schoolMemberships = workspaceUser?.schoolMemberships || []
+  const classMemberships = workspaceUser?.classMemberships || workspaceUser?.memberships || []
+  const schoolAdminSchoolIds = useMemo(
+    () =>
+      schoolMemberships
+        .filter((membership) => membership.membershipRole === 'school_admin')
+        .map((membership) => membership.schoolId),
+    [schoolMemberships]
+  )
+  const teacherClassIds = useMemo(
+    () =>
+      classMemberships
+        .filter((membership) => membership.membershipRole === 'teacher')
+        .map((membership) => membership.classId),
+    [classMemberships]
+  )
   const canUseDeveloperWorkspace = effectiveRoles.includes('developer') || effectiveRoles.includes('admin')
   const canUseAdminWorkspace = effectiveRoles.includes('admin')
-  const canUseTeacherWorkspace = effectiveRoles.includes('teacher') || effectiveRoles.includes('admin')
+  const canUseSchoolAdminWorkspace = canUseAdminWorkspace || schoolAdminSchoolIds.length > 0
+  const canUseTeacherWorkspace = canUseAdminWorkspace || teacherClassIds.length > 0
+
+  const managedSchools = useMemo(() => {
+    if (!workspaceUser) {
+      return []
+    }
+
+    if (canUseAdminWorkspace) {
+      return workspaceUser.schools
+    }
+
+    const allowedSchoolIds = new Set(schoolAdminSchoolIds)
+    return workspaceUser.schools.filter((school) => allowedSchoolIds.has(school.schoolId))
+  }, [workspaceUser, canUseAdminWorkspace, schoolAdminSchoolIds])
+
+  const manageableClasses = useMemo(() => {
+    if (!workspaceUser) {
+      return []
+    }
+
+    if (canUseAdminWorkspace) {
+      return workspaceUser.classes
+    }
+
+    const allowedClassIds = new Set(teacherClassIds)
+    return workspaceUser.classes.filter((entry) => allowedClassIds.has(entry.classId))
+  }, [workspaceUser, canUseAdminWorkspace, teacherClassIds])
+
+  const selectedClass = useMemo(
+    () => manageableClasses.find((entry) => entry.classId === classId),
+    [manageableClasses, classId]
+  )
+  const effectiveSchoolId = selectedClass?.schoolId || schoolId
+
+  useEffect(() => {
+    if (!schoolId && managedSchools.length) {
+      setSchoolId(managedSchools[0].schoolId)
+    }
+  }, [managedSchools, schoolId])
+
+  useEffect(() => {
+    if (!classId && manageableClasses.length) {
+      setClassId(manageableClasses[0].classId)
+    }
+  }, [manageableClasses, classId])
+
+  useEffect(() => {
+    if (selectedClass?.schoolId && selectedClass.schoolId !== schoolId) {
+      setSchoolId(selectedClass.schoolId)
+    }
+  }, [selectedClass?.schoolId, schoolId])
 
   const { data: apps = [], error: appsError } = useChatBridgeApps({
-    enabled: canUseAdminWorkspace || canUseTeacherWorkspace,
+    enabled: canUseAdminWorkspace || canUseTeacherWorkspace || canUseSchoolAdminWorkspace,
+  })
+  const { data: schoolAllowlist = [], error: schoolAllowlistError } = useChatBridgeSchoolAllowlist(effectiveSchoolId, {
+    enabled: canUseSchoolAdminWorkspace || canUseTeacherWorkspace,
   })
   const { data: allowlist = [], error: allowlistError } = useChatBridgeAllowlist(classId, {
-    enabled: canUseTeacherWorkspace,
+    enabled: canUseTeacherWorkspace && !!classId,
   })
   const { data: reviewActions = [], error: reviewActionsError } = useChatBridgeReviewActions({
     enabled: canUseAdminWorkspace,
@@ -106,6 +181,10 @@ export default function ChatBridgeWorkspace() {
     enabled: canUseDeveloperWorkspace,
   })
 
+  const schoolEnabledAppIds = useMemo(
+    () => new Set(schoolAllowlist.filter((entry) => !entry.disabledAt).map((entry) => entry.appId)),
+    [schoolAllowlist]
+  )
   const enabledAppIds = useMemo(
     () => new Set(allowlist.filter((entry) => !entry.disabledAt).map((entry) => entry.appId)),
     [allowlist]
@@ -127,7 +206,8 @@ export default function ChatBridgeWorkspace() {
 
   const workspaceLoadError =
     workspaceUserError ||
-    ((canUseAdminWorkspace || canUseTeacherWorkspace) ? appsError : undefined) ||
+    ((canUseAdminWorkspace || canUseTeacherWorkspace || canUseSchoolAdminWorkspace) ? appsError : undefined) ||
+    ((canUseSchoolAdminWorkspace || canUseTeacherWorkspace) && effectiveSchoolId ? schoolAllowlistError : undefined) ||
     (canUseTeacherWorkspace ? allowlistError : undefined) ||
     (canUseAdminWorkspace ? reviewActionsError : undefined) ||
     (canUseDeveloperWorkspace ? developerAppsError : undefined) ||
@@ -189,6 +269,26 @@ export default function ChatBridgeWorkspace() {
     },
   })
 
+  const schoolAllowlistMutation = useMutation({
+    mutationFn: (input: { appId: string; enabled: boolean; appName: string }) =>
+      (input.enabled
+        ? enableChatBridgeAppForSchool(effectiveSchoolId, input.appId, DEFAULT_SCHOOL_ADMIN_ID)
+        : disableChatBridgeAppForSchool(effectiveSchoolId, input.appId, DEFAULT_SCHOOL_ADMIN_ID)
+      ).then(() => input),
+    onSuccess: (input) => {
+      setErrorMessage(undefined)
+      setStatusMessage(
+        input.enabled
+          ? `${input.appName} enabled for ${effectiveSchoolId}.`
+          : `${input.appName} disabled for ${effectiveSchoolId}.`
+      )
+    },
+    onError: () => {
+      setStatusMessage(undefined)
+      setErrorMessage('School app approval update failed. The backend may be unavailable.')
+    },
+  })
+
   const allowlistMutation = useMutation({
     mutationFn: (input: { appId: string; enabled: boolean; appName: string }) =>
       (input.enabled
@@ -208,6 +308,14 @@ export default function ChatBridgeWorkspace() {
   })
 
   const storyBuilderApp = apps.find((app) => app.appId === DEMO_STORY_BUILDER_MANIFEST.appId)
+  const schoolOptions = managedSchools.map((school) => ({
+    value: school.schoolId,
+    label: school.name,
+  }))
+  const classOptions = manageableClasses.map((entry) => ({
+    value: entry.classId,
+    label: entry.schoolId ? `${entry.name} (${entry.classId})` : entry.name,
+  }))
 
   return (
     <Stack gap="lg" p="md">
@@ -236,10 +344,15 @@ export default function ChatBridgeWorkspace() {
         </Group>
       ) : null}
 
-      {!workspaceUserLoading && !workspaceLoadError && !canUseDeveloperWorkspace && !canUseAdminWorkspace && !canUseTeacherWorkspace ? (
+      {!workspaceUserLoading &&
+      !workspaceLoadError &&
+      !canUseDeveloperWorkspace &&
+      !canUseAdminWorkspace &&
+      !canUseSchoolAdminWorkspace &&
+      !canUseTeacherWorkspace ? (
         <Alert color="blue">
           This account can use TutorMeAI, but it does not currently have ChatBridge workspace permissions. Sign in as an
-          admin, teacher, or developer to manage apps here.
+          admin, school admin, teacher, or developer to manage apps here.
         </Alert>
       ) : null}
 
@@ -455,25 +568,34 @@ export default function ChatBridgeWorkspace() {
           </Card>
         ) : null}
 
-        {canUseTeacherWorkspace ? (
+        {canUseSchoolAdminWorkspace ? (
           <Card withBorder radius="md" p="md">
             <Stack gap="md">
               <Group gap={8}>
-                <IconChecklist size={16} />
-                <Title order={5}>Teacher Class Allowlist</Title>
+                <IconShieldCheck size={16} />
+                <Title order={5}>School App Approval</Title>
               </Group>
 
-              <TextInput
-                label="Class ID"
-                value={classId}
-                onChange={(event) => setClassId(event.currentTarget.value.trim() || 'demo-class')}
-                description="Manage which approved apps are available to a class without opening a student session."
+              <Select
+                label="School"
+                data={schoolOptions}
+                value={effectiveSchoolId || null}
+                onChange={(value) => setSchoolId(value || '')}
+                placeholder={schoolOptions.length ? 'Select a school' : 'No managed schools'}
+                disabled={!schoolOptions.length}
+                description="Enable platform-approved apps for a school before teachers can activate them in their classes."
               />
+
+              {!schoolOptions.length ? (
+                <Alert color="blue">
+                  This account does not currently manage any schools.
+                </Alert>
+              ) : null}
 
               <Stack gap="sm">
                 {apps.map((app) => {
-                  const allowlistEntry = allowlist.find((entry) => entry.appId === app.appId && !entry.disabledAt)
-                  const isEnabled = enabledAppIds.has(app.appId)
+                  const schoolAllowlistEntry = schoolAllowlist.find((entry) => entry.appId === app.appId && !entry.disabledAt)
+                  const isSchoolEnabled = schoolEnabledAppIds.has(app.appId)
                   const isReviewApproved = app.reviewState === 'approved'
 
                   return (
@@ -484,25 +606,116 @@ export default function ChatBridgeWorkspace() {
                             <Text fw={600}>{app.name}</Text>
                             <Text size="xs" c="dimmed">
                               {isReviewApproved
-                                ? isEnabled
-                                  ? `Enabled by ${allowlistEntry?.enabledBy || 'teacher'} on ${formatTimestamp(allowlistEntry?.enabledAt)}`
-                                  : `Approved but not enabled for ${classId}.`
+                                ? isSchoolEnabled
+                                  ? `Enabled for ${effectiveSchoolId} by ${schoolAllowlistEntry?.enabledBy || 'school admin'} on ${formatTimestamp(schoolAllowlistEntry?.enabledAt)}`
+                                  : `Approved at the platform level, but not enabled for ${effectiveSchoolId}.`
                                 : `${app.reviewState} at the platform level.`}
                             </Text>
                           </div>
-                          <Badge
-                            size="sm"
-                            variant={isReviewApproved ? 'light' : 'outline'}
-                            color={isReviewApproved ? 'blue' : 'gray'}
-                          >
-                            {app.reviewState}
-                          </Badge>
+                          <Group gap={6}>
+                            <Badge size="sm" variant={isReviewApproved ? 'light' : 'outline'} color={isReviewApproved ? 'blue' : 'gray'}>
+                              {app.reviewState}
+                            </Badge>
+                            {isSchoolEnabled ? (
+                              <Badge size="sm" variant="light" color="green">
+                                School Enabled
+                              </Badge>
+                            ) : null}
+                          </Group>
+                        </Group>
+
+                        <Button
+                          size="compact-sm"
+                          variant={isSchoolEnabled ? 'light' : 'filled'}
+                          disabled={!isReviewApproved || !effectiveSchoolId}
+                          loading={schoolAllowlistMutation.isPending && schoolAllowlistMutation.variables?.appId === app.appId}
+                          onClick={() =>
+                            schoolAllowlistMutation.mutate({
+                              appId: app.appId,
+                              appName: app.name,
+                              enabled: !isSchoolEnabled,
+                            })
+                          }
+                        >
+                          {isSchoolEnabled ? 'Disable for School' : 'Enable for School'}
+                        </Button>
+                      </Stack>
+                    </Card>
+                  )
+                })}
+              </Stack>
+            </Stack>
+          </Card>
+        ) : null}
+
+        {canUseTeacherWorkspace ? (
+          <Card withBorder radius="md" p="md">
+            <Stack gap="md">
+              <Group gap={8}>
+                <IconChecklist size={16} />
+                <Title order={5}>Teacher Class Allowlist</Title>
+              </Group>
+
+              <Select
+                label="Class"
+                data={classOptions}
+                value={classId || null}
+                onChange={(value) => setClassId(value || '')}
+                placeholder={classOptions.length ? 'Select a class' : 'No managed classes'}
+                disabled={!classOptions.length}
+                description="Manage which school-approved apps are available to a class without opening a student session."
+              />
+
+              {!classOptions.length ? (
+                <Alert color="blue">
+                  This account does not currently teach any classes.
+                </Alert>
+              ) : null}
+
+              <Stack gap="sm">
+                {apps.map((app) => {
+                  const allowlistEntry = allowlist.find((entry) => entry.appId === app.appId && !entry.disabledAt)
+                  const isSchoolEnabled = schoolEnabledAppIds.has(app.appId)
+                  const isEnabled = enabledAppIds.has(app.appId)
+                  const isReviewApproved = app.reviewState === 'approved'
+                  const canEnableForClass = isReviewApproved && isSchoolEnabled
+
+                  return (
+                    <Card key={app.appId} withBorder radius="md" p="sm">
+                      <Stack gap={8}>
+                        <Group justify="space-between" align="flex-start">
+                          <div>
+                            <Text fw={600}>{app.name}</Text>
+                            <Text size="xs" c="dimmed">
+                              {canEnableForClass
+                                ? isEnabled
+                                  ? `Enabled by ${allowlistEntry?.enabledBy || 'teacher'} on ${formatTimestamp(allowlistEntry?.enabledAt)}`
+                                  : `Approved but not enabled for ${classId}.`
+                                : isReviewApproved
+                                  ? `Approved at the platform level, but not yet enabled for ${effectiveSchoolId}.`
+                                : `${app.reviewState} at the platform level.`}
+                            </Text>
+                          </div>
+                          <Group gap={6}>
+                            <Badge
+                              size="sm"
+                              variant={isReviewApproved ? 'light' : 'outline'}
+                              color={isReviewApproved ? 'blue' : 'gray'}
+                            >
+                              {app.reviewState}
+                            </Badge>
+                            {isSchoolEnabled ? (
+                              <Badge size="sm" variant="light" color="green">
+                                School Enabled
+                              </Badge>
+                            ) : null}
+                          </Group>
                         </Group>
 
                         <Button
                           size="compact-sm"
                           variant={isEnabled ? 'light' : 'filled'}
-                          disabled={!isReviewApproved}
+                          disabled={!canEnableForClass || !classId}
                           loading={allowlistMutation.isPending && allowlistMutation.variables?.appId === app.appId}
                           onClick={() =>
                             allowlistMutation.mutate({

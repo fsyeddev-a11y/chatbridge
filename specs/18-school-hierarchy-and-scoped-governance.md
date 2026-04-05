@@ -14,10 +14,10 @@
   - school-level app approval routes
   - class-level activation enforced to require school approval first
   - platform approval state
+  - role-aware school-admin and teacher controls in the dedicated ChatBridge settings workspace
 - Not implemented yet:
   - student app exposure derived from school and class membership
   - runtime validation that backend chat/session access only uses classes the user is entitled to
-  - role-aware frontend school-admin and teacher experiences
 
 ## Context
 

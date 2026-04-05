@@ -2,6 +2,7 @@ import type { BridgeAppManifest } from '@shared/types'
 
 export const DEFAULT_TEACHER_ID = 'teacher-demo'
 export const DEFAULT_REVIEWER_ID = 'platform-admin'
+export const DEFAULT_SCHOOL_ADMIN_ID = 'school-admin-demo'
 
 export const DEMO_STORY_BUILDER_MANIFEST: BridgeAppManifest = {
   appId: 'story-builder',
