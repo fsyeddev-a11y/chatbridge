@@ -1,4 +1,4 @@
-import type { KnowledgeBase, MessagePicture, Toast } from '@shared/types'
+import type { KnowledgeBase, Message, MessagePicture, Toast } from '@shared/types'
 import type { RefObject } from 'react'
 import type { VirtuosoHandle } from 'react-virtuoso'
 import { v4 as uuidv4 } from 'uuid'
@@ -32,6 +32,11 @@ export const uiStore = createStore(
         newSessionState: {} as {
           knowledgeBase?: Pick<KnowledgeBase, 'id' | 'name'>
           webBrowsing?: boolean
+          pendingSubmission?: {
+            sessionId: string
+            constructedMessage: Message
+            needGenerating: boolean
+          }
         },
         pictureShow: null as {
           picture: MessagePicture

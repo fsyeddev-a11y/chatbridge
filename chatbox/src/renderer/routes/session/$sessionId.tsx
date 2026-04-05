@@ -13,6 +13,7 @@ import ChatBridgePanel from '@/components/session/ChatBridgePanel'
 import ChatBridgeShelf from '@/components/session/ChatBridgeShelf'
 import ThreadHistoryDrawer from '@/components/session/ThreadHistoryDrawer'
 import { hydrateBridgeStateFromBackend } from '@/packages/chatbridge/session'
+import { useUIStore } from '@/stores/uiStore'
 import { updateSession as updateSessionStore, useSession } from '@/stores/chatStore'
 import { lastUsedModelStore } from '@/stores/lastUsedModelStore'
 import * as scrollActions from '@/stores/scrollActions'
@@ -30,6 +31,8 @@ function RouteComponent() {
   const { sessionId: currentSessionId } = Route.useParams()
   const navigate = useNavigate()
   const { session: currentSession, isFetching } = useSession(currentSessionId)
+  const newSessionState = useUIStore((s) => s.newSessionState)
+  const setNewSessionState = useUIStore((s) => s.setNewSessionState)
   const setLastUsedChatModel = useStore(lastUsedModelStore, (state) => state.setChatModel)
   const setLastUsedPictureModel = useStore(lastUsedModelStore, (state) => state.setPictureModel)
 
@@ -58,6 +61,23 @@ function RouteComponent() {
 
     void hydrateBridgeStateFromBackend(currentSession.id)
   }, [currentSession?.id])
+
+  useEffect(() => {
+    const pendingSubmission = newSessionState.pendingSubmission
+    if (!currentSession || !pendingSubmission || pendingSubmission.sessionId !== currentSession.id) {
+      return
+    }
+
+    setNewSessionState((prev) => ({
+      ...prev,
+      pendingSubmission: undefined,
+    }))
+
+    void submitNewUserMessage(currentSession.id, {
+      newUserMsg: pendingSubmission.constructedMessage,
+      needGenerating: pendingSubmission.needGenerating,
+    })
+  }, [currentSession, newSessionState.pendingSubmission, setNewSessionState])
 
   // currentSession变化时（包括session settings变化），存下当前的settings作为新Session的默认值
   useEffect(() => {

@@ -52,6 +52,7 @@ export function useSupabaseAuthState() {
     }
 
     let active = true
+    let previousUserId: string | null = null
 
     const initialize = async () => {
       const {
@@ -62,6 +63,7 @@ export function useSupabaseAuthState() {
         return
       }
 
+      previousUserId = session?.user?.id || null
       setIsAuthenticated(Boolean(session))
       setLoading(false)
     }
@@ -75,15 +77,21 @@ export function useSupabaseAuthState() {
         return
       }
 
-      queryClient.removeQueries({
-        predicate: (query) => {
-          const queryKey = query.queryKey
-          return (
-            (Array.isArray(queryKey) && queryKey[0] === 'chat-sessions-list') ||
-            (Array.isArray(queryKey) && queryKey[0] === 'chat-session')
-          )
-        },
-      })
+      const nextUserId = session?.user?.id || null
+      const didUserChange = previousUserId !== nextUserId
+      previousUserId = nextUserId
+
+      if (didUserChange) {
+        queryClient.removeQueries({
+          predicate: (query) => {
+            const queryKey = query.queryKey
+            return (
+              (Array.isArray(queryKey) && queryKey[0] === 'chat-sessions-list') ||
+              (Array.isArray(queryKey) && queryKey[0] === 'chat-session')
+            )
+          },
+        })
+      }
       if (!session) {
         getDefaultStore().set(currentSessionIdAtom, null)
       }

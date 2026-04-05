@@ -292,7 +292,7 @@ export async function updateSession(sessionId: string, updater: Updater<Omit<Ses
 }
 
 // only update session cache without touching storage, for performance sensitive usage
-export async function updateSessionCache(sessionId: string, updater: Updater<Session>) {
+export async function updateSessionCache(sessionId: string, updater: Updater<Session>): Promise<Session> {
   console.debug('chatStore', 'updateSessionCache', sessionId, updater)
   const session = await getSession(sessionId)
   if (!session) {
@@ -312,6 +312,33 @@ export async function updateSessionCache(sessionId: string, updater: Updater<Ses
   if (sessionUpdateQueues[sessionId] && nextSession) {
     sessionUpdateQueues[sessionId].replaceState(nextSession)
   }
+  return nextSession ?? session
+}
+
+export async function refreshSessionFromBackend(sessionId: string) {
+  if (!USE_CHATBRIDGE_BACKEND_SESSIONS) {
+    return await getSession(sessionId)
+  }
+
+  const session = await _getSessionById(sessionId)
+  if (!session) {
+    return null
+  }
+
+  _setSessionCache(sessionId, session)
+  queryClient.setQueryData(QueryKeys.ChatSessionsList, (current: SessionMeta[] | undefined) => {
+    const source = current || []
+    const nextMeta = getSessionMeta(session)
+    if (source.some((entry) => entry.id === sessionId)) {
+      return source.map((entry) => (entry.id === sessionId ? nextMeta : entry))
+    }
+    return [...source, nextMeta]
+  })
+  if (sessionUpdateQueues[sessionId]) {
+    sessionUpdateQueues[sessionId].replaceState(session)
+  }
+
+  return session
 }
 
 export async function deleteSession(id: string) {

@@ -19,7 +19,7 @@ import { useProviders } from '@/hooks/useProviders'
 import { useIsSmallScreen } from '@/hooks/useScreenChange'
 import { router } from '@/router'
 import { createSession as createSessionStore } from '@/stores/chatStore'
-import { submitNewUserMessage, switchCurrentSession } from '@/stores/sessionActions'
+import { switchCurrentSession } from '@/stores/sessionActions'
 import { initEmptyChatSession } from '@/stores/sessionHelpers'
 import { shouldSkipProviderSetup } from '@/stores/settingActions'
 import { useUIStore } from '@/stores/uiStore'
@@ -124,13 +124,16 @@ function Index() {
         clearSessionWebBrowsing('new')
       }
 
+      onUserMessageReady?.()
+      setNewSessionState((prev) => ({
+        ...prev,
+        pendingSubmission: {
+          sessionId: newSession.id,
+          constructedMessage,
+          needGenerating,
+        },
+      }))
       switchCurrentSession(newSession.id)
-
-      await submitNewUserMessage(newSession.id, {
-        newUserMsg: constructedMessage,
-        needGenerating,
-        onUserMessageReady,
-      })
     },
     [
       session,
@@ -140,6 +143,7 @@ function Index() {
       sessionWebBrowsingMap,
       setSessionWebBrowsing,
       clearSessionWebBrowsing,
+      setNewSessionState,
     ]
   )
 

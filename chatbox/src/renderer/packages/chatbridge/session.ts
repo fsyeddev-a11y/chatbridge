@@ -75,7 +75,7 @@ async function syncBridgeStateToBackend(sessionId: string, bridgeState: SessionB
       return bridgeState
     }
 
-    await chatStore.updateSessionWithMessages(sessionId, (currentSession) => ({
+    await chatStore.updateSessionCache(sessionId, (currentSession) => ({
       ...currentSession,
       bridgeState: canonicalBridgeState,
     }))
@@ -110,7 +110,7 @@ export async function hydrateBridgeStateFromBackend(sessionId: string) {
       return normalized
     }
 
-    await chatStore.updateSessionWithMessages(sessionId, (currentSession) => ({
+    await chatStore.updateSessionCache(sessionId, (currentSession) => ({
       ...currentSession,
       bridgeState: normalized,
     }))
@@ -123,7 +123,7 @@ export async function hydrateBridgeStateFromBackend(sessionId: string) {
 }
 
 export async function activateBridgeApp(sessionId: string, appId: string) {
-  const nextSession = await chatStore.updateSessionWithMessages(sessionId, (session) => {
+  const nextSession = await chatStore.updateSessionCache(sessionId, (session) => {
     const bridgeState = getSessionBridgeState(session)
     const existing = bridgeState.appContext[appId]
     return {
@@ -158,7 +158,7 @@ export async function activateBridgeApp(sessionId: string, appId: string) {
 }
 
 export async function closeBridgeApp(sessionId: string) {
-  const nextSession = await chatStore.updateSessionWithMessages(sessionId, (session) => {
+  const nextSession = await chatStore.updateSessionCache(sessionId, (session) => {
     const bridgeState = getSessionBridgeState(session)
     return {
       ...session,
@@ -181,7 +181,7 @@ export async function closeBridgeApp(sessionId: string) {
 }
 
 export async function updateBridgeAppContext(sessionId: string, appId: string, nextState: Partial<BridgeAppContext>) {
-  const nextSession = await chatStore.updateSessionWithMessages(sessionId, (session) => {
+  const nextSession = await chatStore.updateSessionCache(sessionId, (session) => {
     const bridgeState = getSessionBridgeState(session)
     const previous = bridgeState.appContext[appId]
     return {

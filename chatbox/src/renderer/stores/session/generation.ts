@@ -242,7 +242,7 @@ export async function generate(
           const backendResult = await generateBackendChat(promptMsgs, backendRequestOptions)
 
           if (backendResult.bridgeState) {
-            await chatStore.updateSessionWithMessages(sessionId, (currentSession) => ({
+            await chatStore.updateSessionCache(sessionId, (currentSession) => ({
               ...currentSession,
               bridgeState: backendResult.bridgeState,
             }))
@@ -293,6 +293,9 @@ export async function generate(
           }
         }
         await modifyMessage(sessionId, targetMsg, true)
+        if (USE_CHATBRIDGE_BACKEND_CHAT) {
+          await chatStore.refreshSessionFromBackend(sessionId)
+        }
         break
       }
       // Picture message generation
@@ -351,6 +354,9 @@ export async function generate(
         finishReason: 'cancel',
       }
       await modifyMessage(sessionId, targetMsg, true)
+      if (USE_CHATBRIDGE_BACKEND_CHAT) {
+        await chatStore.refreshSessionFromBackend(sessionId)
+      }
       return
     }
 
@@ -391,6 +397,9 @@ export async function generate(
       status: [],
     }
     await modifyMessage(sessionId, targetMsg, true)
+    if (USE_CHATBRIDGE_BACKEND_CHAT) {
+      await chatStore.refreshSessionFromBackend(sessionId)
+    }
   }
 }
 
