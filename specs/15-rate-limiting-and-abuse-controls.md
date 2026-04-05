@@ -30,7 +30,7 @@ Once TutorMeAI uses backend-owned model access, it becomes an attractive abuse t
 #### Acceptance Criteria
 
 - Chat generation has per-user limits.
-- The system can later support per-class or per-org limits.
+- The system can later support per-class or per-school limits.
 - Rate-limited responses return a clear, non-ambiguous error.
 - Rate-limit events are logged for observability.
 
@@ -47,7 +47,7 @@ Once TutorMeAI uses backend-owned model access, it becomes an attractive abuse t
 per-user
 per-session
 per-IP (defense in depth)
-later: per-class / per-org
+later: per-class / per-school
 ```
 
 ---

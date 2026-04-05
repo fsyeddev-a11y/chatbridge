@@ -22,6 +22,8 @@
 
 ChatBridge already has internal manifest registration APIs, but not a real developer-facing registration product. This epic defines the self-serve developer onboarding experience needed to move from internal control-plane registration to external app ecosystem growth.
 
+Developer submissions are global platform submissions. They do not belong to a school. A school only becomes relevant after platform review, when school admins decide whether to adopt the app for their school.
+
 ---
 
 ## User Stories
@@ -37,6 +39,7 @@ ChatBridge already has internal manifest registration APIs, but not a real devel
 - Developer users can sign in separately from teacher/student flows.
 - Developers can submit a new manifest through a form or validated upload flow.
 - Submitted manifests enter `pending` review state automatically.
+- Submitted manifests enter the global TutorMeAI registry, not a school-scoped registry.
 
 #### Testing
 
@@ -52,7 +55,7 @@ developer signs in
   -> opens developer portal
   -> submits manifest form or validated JSON upload
   -> backend validates schema and ownership
-  -> app enters pending review
+  -> app enters global pending review
   -> developer receives submission identifier and initial status
 ```
 
@@ -69,6 +72,7 @@ developer signs in
 - Developers can view only apps they own.
 - Developers can see current review state and high-level feedback.
 - Developers can distinguish between new submission, approved version, and suspended app states.
+- Developers do not gain school governance access by owning an app.
 
 #### Testing
 
@@ -116,6 +120,10 @@ pending version never silently replaces active version
 review actions are version-specific
 suspension history remains auditable across versions
 ```
+
+**Scope rule:**
+- Version approval remains platform-global.
+- School adoption happens after platform approval and is owned by school admins, not developers.
 
 ## Out of Scope
 

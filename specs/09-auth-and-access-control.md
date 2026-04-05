@@ -3,7 +3,7 @@
 ## Dependencies
 
 - Depends on: none
-- Informs: `10-backend-owned-generation-and-streaming.md`, `11-persistence-and-app-sessions.md`, `12-teacher-admin-surfaces.md`, `14-developer-registration-portal.md`, `15-rate-limiting-and-abuse-controls.md`, `17-role-based-authorization-and-class-membership.md`
+- Informs: `10-backend-owned-generation-and-streaming.md`, `11-persistence-and-app-sessions.md`, `12-teacher-admin-surfaces.md`, `14-developer-registration-portal.md`, `15-rate-limiting-and-abuse-controls.md`, `17-role-based-authorization-and-class-membership.md`, `18-school-hierarchy-and-scoped-governance.md`
 
 ## Status
 
@@ -12,17 +12,17 @@
   - no public sign-up for current internal testing
   - bearer-token verification on protected `bridge-backend` routes
   - backend-owned user profile creation on authenticated requests
-  - initial user-role foundation with `admin`, `teacher`, `student`, and `developer`
+  - initial user-role foundation with global roles and scoped memberships in progress
   - `GET /api/me` profile surface for future role-aware UI
 - Not implemented yet:
-  - role-backed route enforcement for privileged actions
-  - school/org enrollment model
-  - separate teacher, student, admin, and developer account experiences
-  - detailed multi-role and class-membership enforcement, specified in `17-role-based-authorization-and-class-membership.md`
+  - full school-scoped route enforcement for privileged actions
+  - complete school and class enrollment model
+  - separate teacher, student, school admin, platform admin, and developer account experiences
+  - detailed role, school, and class enforcement, specified in `17-role-based-authorization-and-class-membership.md` and `18-school-hierarchy-and-scoped-governance.md`
 
 ## Context
 
-TutorMeAI can no longer rely on local browser provider settings or anonymous access. The deployed web app already uses Supabase sign-in for internal testers, but the long-term system needs a formal access-control contract: who can sign in, what roles exist, what routes are protected, and how the Bridge backend verifies identity before allowing model access, app control, or admin actions.
+TutorMeAI can no longer rely on local browser provider settings or anonymous access. The deployed web app already uses Supabase sign-in for internal testers, but the long-term system needs a formal access-control contract: who can sign in, what global roles exist, what school and class memberships exist, what routes are protected, and how the Bridge backend verifies identity before allowing model access, app control, or admin actions.
 
 This epic defines the access-control model for ChatBridge and TutorMeAI.
 
@@ -80,14 +80,18 @@ Public routes:
 
 #### Acceptance Criteria
 
-- The auth model supports at least four roles:
-  - `student`
-  - `teacher`
-  - `platform_admin`
-  - `developer`
+- The auth model supports:
+  - global roles:
+    - `platform_admin`
+    - `developer`
+  - scoped memberships:
+    - `school_admin`
+    - `teacher`
+    - `student`
 - Role checks happen on the backend before privileged actions are allowed.
 - Platform review actions require admin privileges.
-- Teacher allowlist changes require teacher or admin privileges.
+- School allowlist changes require school-admin or platform-admin privileges.
+- Teacher class allowlist changes require teacher-for-class or platform-admin privileges.
 - Developer registration actions require developer or admin privileges.
 
 #### Testing
@@ -98,25 +102,27 @@ Public routes:
 
 #### Spec
 
-**Role model:**
+**Role and membership model:**
 
 ```
-student
-  - use TutorMeAI
-  - access approved apps for enrolled classes
-
-teacher
-  - everything student can do
-  - manage class allowlists
-
 platform_admin
-  - everything teacher can do
+  - global platform governance
   - approve/suspend/reject apps
   - view platform-wide audit and registry state
 
 developer
   - submit and manage owned manifests
   - view review feedback for owned apps
+
+school_admin
+  - manage school-scoped app approval
+  - manage school-scoped teacher/student/class state
+
+teacher
+  - manage class activation for classes they teach
+
+student
+  - use approved apps for enrolled classes
 ```
 
 **MVP note:**
@@ -134,10 +140,14 @@ student
 
 teacher
   - everything student can do
-  - mutate class allowlists for owned classes
+  - mutate class allowlists for taught classes
+
+school_admin
+  - read school governance state
+  - mutate school app approvals for owned school
 
 platform_admin
-  - everything teacher can do
+  - everything school_admin can do
   - mutate review state
   - view platform-wide audit and registry data
 
@@ -190,14 +200,14 @@ Browser
 
 **As a** product team,  
 **I want** a low-friction internal testing login flow,  
-**so that** we can test quickly without building the full school/org identity model first.
+**so that** we can test quickly without building the full production school identity model first.
 
 #### Acceptance Criteria
 
 - Public sign-up can be disabled.
 - Shared internal test accounts can sign in successfully.
 - Backend auth enforcement remains identical whether the account is shared or individualized.
-- The auth model can later evolve to per-user or per-org accounts without redesigning the backend boundary.
+- The auth model can later evolve to per-user and per-school accounts without redesigning the backend boundary.
 
 #### Testing
 
@@ -222,7 +232,7 @@ Bridge backend
 
 ## Out of Scope
 
-- Classroom roster sync
+- classroom roster sync
 - parent/guardian access
 - SSO and school district identity federation
-- fine-grained org tenancy rules
+- district hierarchy

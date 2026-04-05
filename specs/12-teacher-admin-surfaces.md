@@ -1,4 +1,4 @@
-# Epic 12: Teacher & Admin Surfaces
+# Epic 12: Teacher, School Admin & Platform Admin Surfaces
 
 ## Dependencies
 
@@ -12,11 +12,12 @@
   - session page link-out to the canonical ChatBridge workspace
 - Not implemented yet:
   - role-backed navigation and access control in production UI
+  - school-admin school-scoped surfaces
   - class-scoped teacher views based on real class memberships
 
 ## Context
 
-The current runtime no longer needs a full governance control plane embedded inside a live tutoring session. Platform review, teacher allowlisting, and app visibility should live in dedicated settings/admin surfaces, while the session page should stay focused on the app shelf, active app panel, and conversation.
+The current runtime no longer needs a full governance control plane embedded inside a live tutoring session. Platform review, school approval, teacher class activation, and app visibility should live in dedicated settings/admin surfaces, while the session page should stay focused on the app shelf, active app panel, and conversation.
 
 ---
 
@@ -54,10 +55,42 @@ suspend/reject/approve actions
 
 ---
 
-### US-12.2: Teachers can manage class app allowlists outside a live session
+### US-12.2: School admins can manage school app approval outside a live session
+
+**As a** school admin,  
+**I want** to enable and disable platform-approved apps for my school,  
+**so that** teachers only see apps my school has accepted.
+
+#### Acceptance Criteria
+
+- School admins can view platform-approved apps.
+- School admins can enable/disable apps for their school.
+- Teachers only see school-enabled apps as candidates for class activation.
+- School admins cannot mutate another school’s governance state.
+
+#### Testing
+
+- Integration tests verify school allowlist mutations require school-admin or platform-admin privileges.
+- Manual test confirms enabling an app for one school does not affect another school.
+
+#### Spec
+
+**School-admin surface must support:**
+
+```text
+school selector limited to owned schools
+platform-approved app list
+per-school enable/disable controls
+clear suspended/unapproved status
+last change attribution
+```
+
+---
+
+### US-12.3: Teachers can manage class app activation outside a live session
 
 **As a** teacher,  
-**I want** to enable and disable approved apps for my class from a dedicated class surface,  
+**I want** to enable and disable school-approved apps for a class I teach from a dedicated class surface,  
 **so that** class configuration is not tied to an active TutorMeAI chat.
 
 #### Acceptance Criteria
@@ -66,6 +99,8 @@ suspend/reject/approve actions
 - Teachers can enable/disable approved apps for a class.
 - The app shelf and tool exposure respect class settings after changes.
 - Teachers cannot enable suspended or unapproved apps.
+- Teachers cannot enable apps for classes they do not teach.
+- Teachers cannot enable apps that the school has not approved.
 
 #### Testing
 
@@ -78,7 +113,7 @@ suspend/reject/approve actions
 
 ```
 class selector
-approved app list
+school-approved app list
 per-class enable/disable controls
 clear suspended/unapproved status
 last change attribution
@@ -86,7 +121,7 @@ last change attribution
 
 ---
 
-### US-12.3: Admin and teacher UIs expose meaningful status and failure signals
+### US-12.4: Admin and teacher UIs expose meaningful status and failure signals
 
 **As a** teacher or admin,  
 **I want** to see review state, enablement state, and major runtime problems,  
@@ -95,6 +130,7 @@ last change attribution
 #### Acceptance Criteria
 
 - Admin UI shows review state per app.
+- School-admin UI shows school enablement state per app.
 - Teacher UI shows class enablement state per app.
 - Major suspension or failure signals are visible in the relevant surfaces.
 
@@ -104,7 +140,7 @@ last change attribution
 
 ---
 
-### US-12.4: Live sessions stay runtime-focused
+### US-12.5: Live sessions stay runtime-focused
 
 **As a** student or tutor,  
 **I want** the session page to focus on the conversation and active apps,  

@@ -2,7 +2,7 @@
 
 ## Context
 
-When a student types into TutorMeAI, the platform has to decide whether the input should be handled as plain conversation, answered with first-party tools, or routed into a double-approved ChatBridge app. In the current implementation, that decision happens inside the model call pipeline, but the behavior is not yet documented as a formal system contract.
+When a student types into TutorMeAI, the platform has to decide whether the input should be handled as plain conversation, answered with first-party tools, or routed into a ChatBridge app that passed the required platform, school, and class gates. In the current implementation, that decision happens inside the model call pipeline, but the behavior is not yet documented as a formal system contract.
 
 This epic defines the end-to-end routing path from student input to model response, including where tool lists are injected, what the model is allowed to see, and how ChatBridge app tools participate without taking control of the chat.
 
@@ -68,7 +68,7 @@ This epic defines the end-to-end routing path from student input to model respon
 
 - Tool lists are assembled at generation time, not hardcoded in the prompt.
 - ChatBridge tools are included only when the session has an `activeClassId`.
-- ChatBridge tools are generated only from apps that are both platform-approved and class-allowlisted.
+- ChatBridge tools are generated only from apps that are platform-approved, school-enabled, and class-allowlisted.
 - If a class has no approved ChatBridge apps, no ChatBridge tools are injected.
 - A student prompt cannot invoke an app whose tool is absent from the assembled toolset.
 
@@ -92,7 +92,7 @@ streamText(...)
 3. getChatBridgeToolSet():
    - loads the session
    - reads activeClassId from bridge/session state
-   - resolves double-approved apps for that class
+   - resolves apps that passed platform approval, school approval, and class activation for that class
    - converts approved manifest tools into AI tool definitions
 4. streamText appends the ChatBridge tool descriptions to toolSetInstructions
 5. streamText merges the ChatBridge tool definitions into the tools object sent to the model

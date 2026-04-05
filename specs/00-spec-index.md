@@ -21,6 +21,7 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [x] `15` rate limiting and abuse controls
 - [x] `16` deployment and runtime optimization
 - [x] `17` role-based authorization and class membership
+- [x] `18` school hierarchy and scoped governance
 
 ## Implementation Progress Checklist
 
@@ -37,6 +38,10 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [x] `17` Multi-role backend authorization and route enforcement
 - [ ] `17` Class membership and role-aware app/session access
 - [ ] `17` Role-aware frontend navigation and surfaces
+- [ ] `18` School hierarchy schema and scoped memberships
+- [ ] `18` School-level app approval
+- [ ] `18` Class-level activation constrained by school approval
+- [ ] `18` Student shelf and tool exposure derived from school + class scope
 - [x] `12` Dedicated teacher/admin surfaces
 - [x] `03` OAuth connect/status/revoke foundation
 - [ ] `13` Additional real apps beyond Weather
@@ -57,7 +62,7 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [02-postmessage-protocol.md](/Users/fsyed/Documents/ChatBridge/specs/02-postmessage-protocol.md)
   - Defines the host/app runtime protocol inside the iframe boundary.
 - [04-approval-and-governance.md](/Users/fsyed/Documents/ChatBridge/specs/04-approval-and-governance.md)
-  - Defines platform approval and class allowlisting.
+  - Defines platform approval, school approval, and class activation.
 - [05-error-recovery-and-resilience.md](/Users/fsyed/Documents/ChatBridge/specs/05-error-recovery-and-resilience.md)
   - Defines timeouts, recovery, and degraded behavior.
 - [06-developer-sdk.md](/Users/fsyed/Documents/ChatBridge/specs/06-developer-sdk.md)
@@ -78,14 +83,16 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [15-rate-limiting-and-abuse-controls.md](/Users/fsyed/Documents/ChatBridge/specs/15-rate-limiting-and-abuse-controls.md)
   - Protects the backend generation and app runtime surface from abuse.
 - [17-role-based-authorization-and-class-membership.md](/Users/fsyed/Documents/ChatBridge/specs/17-role-based-authorization-and-class-membership.md)
-  - Defines multi-role authorization, class membership, and route enforcement beyond basic auth.
+  - Defines multi-role authorization, school/class membership, and route enforcement beyond basic auth.
+- [18-school-hierarchy-and-scoped-governance.md](/Users/fsyed/Documents/ChatBridge/specs/18-school-hierarchy-and-scoped-governance.md)
+  - Defines the school boundary, school-admin scope, teacher class activation, and student app visibility chain.
 
 ### Governance, Product Surfaces, and Ecosystem
 
 - [12-teacher-admin-surfaces.md](/Users/fsyed/Documents/ChatBridge/specs/12-teacher-admin-surfaces.md)
-  - Defines the real control-plane UI beyond the session-local internal panel.
+  - Defines the real control-plane UI for platform admins, school admins, and teachers beyond the session-local internal panel.
 - [14-developer-registration-portal.md](/Users/fsyed/Documents/ChatBridge/specs/14-developer-registration-portal.md)
-  - Defines developer self-serve onboarding and versioned submissions.
+  - Defines developer self-serve onboarding and versioned submissions into the global platform registry.
 
 ### External Integrations
 
@@ -104,16 +111,17 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 1. Auth and access control
 2. Durable persistence and app sessions
 3. Role-based authorization and class membership
-4. Backend-owned generation
-5. Rate limiting and abuse controls
-6. Teacher/admin surfaces
-7. OAuth orchestration
-8. Real app integrations beyond Weather
-9. Developer registration portal
-10. Deployment/runtime optimization
+4. School hierarchy and scoped governance
+5. Backend-owned generation
+6. Rate limiting and abuse controls
+7. Teacher/admin surfaces
+8. OAuth orchestration
+9. Real app integrations beyond Weather
+10. Developer registration portal
+11. Deployment/runtime optimization
 
 ## Notes
 
 - Earlier epics `01` through `08` define the base Bridge contract.
-- Later epics `09` through `16` define the remaining productization and production-readiness work.
+- Later epics `09` through `18` define the remaining productization and production-readiness work.
 - Some implementation slices span multiple specs; for example, Google Classroom depends on `03`, `09`, `10`, `11`, and `13`.
