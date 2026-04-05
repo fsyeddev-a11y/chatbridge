@@ -10,13 +10,14 @@
 - Implemented now:
   - authenticated user bootstrap through Supabase
   - backend-owned `user_profiles`
-  - single default role assignment on first authenticated request
+  - durable multi-role bootstrap through `user_roles`
+  - durable class and class membership bootstrap through `classes` and `class_memberships`
   - user-owned chat session persistence
   - developer-owned app submission and review visibility
+  - centralized backend role checks for privileged routes
 - Not implemented yet:
-  - multi-role assignment model
-  - class membership model
-  - route-level authorization enforcement for privileged actions
+  - class-specific teacher ownership enforcement
+  - runtime class membership validation for app/session access
   - role-aware frontend navigation and feature visibility
   - admin tooling for role assignment and class membership management
 

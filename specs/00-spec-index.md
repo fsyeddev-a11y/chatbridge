@@ -34,7 +34,7 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [x] `11` Backend-owned app/session reconciliation
 - [x] `11` App-context snapshot persistence
 - [x] `09` User profile and role foundation
-- [ ] `17` Multi-role backend authorization and route enforcement
+- [x] `17` Multi-role backend authorization and route enforcement
 - [ ] `17` Class membership and role-aware app/session access
 - [ ] `17` Role-aware frontend navigation and surfaces
 - [x] `12` Dedicated teacher/admin surfaces

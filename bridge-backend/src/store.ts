@@ -5,6 +5,8 @@ import type {
   AppRegistryEntry,
   AppVersionRecord,
   AuditEvent,
+  ClassMembershipRecord,
+  ClassRecord,
   ChatSessionMetaRecord,
   ChatSessionRecord,
   BridgeSessionRecord,
@@ -13,9 +15,10 @@ import type {
   ReviewAction,
   SessionBridgeState,
   UserProfile,
-  UserRole,
+  UserRoleAssignment,
 } from './types.js'
 import { createSupabaseBridgeStore } from './supabase-store.js'
+import { normalizeRoles, resolveDefaultUserRoles, selectPrimaryUserRole } from './authorization.js'
 
 type Awaitable<T> = T | Promise<T>
 
@@ -25,6 +28,8 @@ export type BridgeStore = {
     email?: string
   }): Awaitable<UserProfile>
   getUserProfile(userId: string): Awaitable<UserProfile | undefined>
+  listClassesForUser(userId: string): Awaitable<ClassRecord[]>
+  listClassMembershipsForUser(userId: string): Awaitable<ClassMembershipRecord[]>
   listRegistryEntries(): Awaitable<AppRegistryEntry[]>
   listRegistryEntriesForOwner(userId: string): Awaitable<AppRegistryEntry[]>
   getRegistryEntry(appId: string): Awaitable<AppRegistryEntry | undefined>
@@ -71,6 +76,9 @@ export type BridgeStore = {
 
 export type BridgeStoreData = {
   userProfiles: UserProfile[]
+  userRoleAssignments: UserRoleAssignment[]
+  classRecords: ClassRecord[]
+  classMemberships: ClassMembershipRecord[]
   registryEntries: AppRegistryEntry[]
   appVersions: AppVersionRecord[]
   classAllowlist: ClassAppAllowlist[]
@@ -84,6 +92,7 @@ export type BridgeStoreData = {
 export type BridgeStoreDriver = 'file' | 'supabase'
 
 const DEFAULT_WEATHER_APP_URL = 'http://localhost:4173'
+const DEMO_CLASS_ID = 'demo-class'
 
 export function getConfiguredWeatherAppUrl(envValue = process.env.CHATBRIDGE_WEATHER_APP_URL) {
   if (!envValue) {
@@ -243,12 +252,22 @@ function createSeedData(): BridgeStoreData {
 
   return {
     userProfiles: [],
+    userRoleAssignments: [],
+    classRecords: [
+      {
+        classId: DEMO_CLASS_ID,
+        name: 'Demo Class',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    classMemberships: [],
     registryEntries,
     appVersions,
     classAllowlist: [
-      { classId: 'demo-class', appId: 'chess', enabledBy: 'teacher-demo', enabledAt: now },
-      { classId: 'demo-class', appId: 'weather', enabledBy: 'teacher-demo', enabledAt: now },
-      { classId: 'demo-class', appId: 'google-classroom', enabledBy: 'teacher-demo', enabledAt: now },
+      { classId: DEMO_CLASS_ID, appId: 'chess', enabledBy: 'teacher-demo', enabledAt: now },
+      { classId: DEMO_CLASS_ID, appId: 'weather', enabledBy: 'teacher-demo', enabledAt: now },
+      { classId: DEMO_CLASS_ID, appId: 'google-classroom', enabledBy: 'teacher-demo', enabledAt: now },
     ],
     auditEvents: [],
     reviewActions: [],
@@ -258,41 +277,28 @@ function createSeedData(): BridgeStoreData {
   }
 }
 
-function getConfiguredUserRoleEmails(envValue: string | undefined) {
-  return new Set(
-    (envValue || '')
-      .split(',')
-      .map((value) => value.trim().toLowerCase())
-      .filter(Boolean)
-  )
-}
-
-export function resolveDefaultUserRole(email?: string): UserRole {
-  const normalizedEmail = email?.trim().toLowerCase()
-  const adminEmails = getConfiguredUserRoleEmails(process.env.CHATBRIDGE_ADMIN_EMAILS)
-  const teacherEmails = getConfiguredUserRoleEmails(process.env.CHATBRIDGE_TEACHER_EMAILS)
-  const developerEmails = getConfiguredUserRoleEmails(process.env.CHATBRIDGE_DEVELOPER_EMAILS)
-
-  if (normalizedEmail && adminEmails.has(normalizedEmail)) {
-    return 'admin'
-  }
-  if (normalizedEmail && teacherEmails.has(normalizedEmail)) {
-    return 'teacher'
-  }
-  if (normalizedEmail && developerEmails.has(normalizedEmail)) {
-    return 'developer'
-  }
-
-  return 'student'
-}
-
 function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: BridgeStoreData) => void): BridgeStore {
-  const { userProfiles, registryEntries, appVersions, classAllowlist, auditEvents, reviewActions, bridgeSessions, oauthTokens, chatSessions } =
-    data
+  const {
+    userProfiles,
+    userRoleAssignments,
+    classRecords,
+    classMemberships,
+    registryEntries,
+    appVersions,
+    classAllowlist,
+    auditEvents,
+    reviewActions,
+    bridgeSessions,
+    oauthTokens,
+    chatSessions,
+  } = data
 
   function persist() {
     onWrite?.({
       userProfiles,
+      userRoleAssignments,
+      classRecords,
+      classMemberships,
       registryEntries,
       appVersions,
       classAllowlist,
@@ -338,6 +344,90 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
 
   function getUserProfileInternal(userId: string) {
     return userProfiles.find((profile) => profile.userId === userId)
+  }
+
+  function getActiveUserRoles(userId: string) {
+    const assignedRoles = userRoleAssignments
+      .filter((assignment) => assignment.userId === userId && !assignment.revokedAt)
+      .map((assignment) => assignment.role)
+
+    if (assignedRoles.length > 0) {
+      return normalizeRoles(assignedRoles)
+    }
+
+    const existingProfile = getUserProfileInternal(userId)
+    if (!existingProfile) {
+      return []
+    }
+
+    return normalizeRoles(existingProfile.roles?.length ? existingProfile.roles : [existingProfile.role])
+  }
+
+  function ensureDefaultRoleAssignments(userId: string, email?: string) {
+    const now = Date.now()
+    const defaultRoles = resolveDefaultUserRoles(email)
+    let changed = false
+
+    for (const role of defaultRoles) {
+      const existing = userRoleAssignments.find(
+        (assignment) => assignment.userId === userId && assignment.role === role && !assignment.revokedAt
+      )
+      if (!existing) {
+        userRoleAssignments.push({
+          userId,
+          role,
+          assignedBy: 'system-bootstrap',
+          assignedAt: now,
+        })
+        changed = true
+      }
+    }
+
+    return {
+      roles: getActiveUserRoles(userId),
+      changed,
+    }
+  }
+
+  function ensureDemoClassExists() {
+    const existing = classRecords.find((record) => record.classId === DEMO_CLASS_ID)
+    if (existing) {
+      return existing
+    }
+
+    const now = Date.now()
+    const nextRecord: ClassRecord = {
+      classId: DEMO_CLASS_ID,
+      name: 'Demo Class',
+      createdAt: now,
+      updatedAt: now,
+    }
+    classRecords.push(nextRecord)
+    return nextRecord
+  }
+
+  function listActiveClassMembershipsForUser(userId: string) {
+    return classMemberships.filter((membership) => membership.userId === userId && !membership.removedAt)
+  }
+
+  function ensureDefaultClassMembership(userId: string, roles: ReturnType<typeof getActiveUserRoles>) {
+    if (listActiveClassMembershipsForUser(userId).length > 0) {
+      return false
+    }
+
+    const membershipRole = roles.includes('teacher') ? 'teacher' : roles.includes('student') ? 'student' : undefined
+    if (!membershipRole) {
+      return false
+    }
+
+    ensureDemoClassExists()
+    classMemberships.push({
+      classId: DEMO_CLASS_ID,
+      userId,
+      membershipRole,
+      createdAt: Date.now(),
+    })
+    return true
   }
 
   function buildChatSessionMeta(sessionRecord: ChatSessionRecord): ChatSessionMetaRecord {
@@ -396,18 +486,39 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
       const existing = getUserProfileInternal(user.userId)
       const now = Date.now()
       if (existing) {
+        const { roles, changed: rolesChanged } = ensureDefaultRoleAssignments(user.userId, user.email ?? existing.email)
+        const nextPrimaryRole = selectPrimaryUserRole(roles)
+        let changed = rolesChanged
         if (user.email && existing.email !== user.email) {
           existing.email = user.email
+          changed = true
+        }
+        if (existing.role !== nextPrimaryRole) {
+          existing.role = nextPrimaryRole
+          changed = true
+        }
+        if (JSON.stringify(existing.roles) !== JSON.stringify(roles)) {
+          existing.roles = roles
+          changed = true
+        }
+        if (ensureDefaultClassMembership(user.userId, roles)) {
+          changed = true
+        }
+        if (changed) {
           existing.updatedAt = now
           persist()
         }
         return existing
       }
 
+      const { roles } = ensureDefaultRoleAssignments(user.userId, user.email)
+      ensureDemoClassExists()
+      ensureDefaultClassMembership(user.userId, roles)
       const nextProfile: UserProfile = {
         userId: user.userId,
         email: user.email,
-        role: resolveDefaultUserRole(user.email),
+        role: selectPrimaryUserRole(roles),
+        roles,
         createdAt: now,
         updatedAt: now,
       }
@@ -417,6 +528,13 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
     },
     getUserProfile(userId) {
       return getUserProfileInternal(userId)
+    },
+    listClassesForUser(userId) {
+      const classIds = new Set(listActiveClassMembershipsForUser(userId).map((membership) => membership.classId))
+      return classRecords.filter((record) => classIds.has(record.classId))
+    },
+    listClassMembershipsForUser(userId) {
+      return listActiveClassMembershipsForUser(userId)
     },
     listRegistryEntries() {
       return registryEntries
@@ -736,6 +854,9 @@ function readStoreFile(filePath: string): BridgeStoreData {
 
   return migrateStoreData({
     userProfiles: parsed.userProfiles || [],
+    userRoleAssignments: parsed.userRoleAssignments || [],
+    classRecords: parsed.classRecords || [],
+    classMemberships: parsed.classMemberships || [],
     registryEntries: parsed.registryEntries || [],
     appVersions: parsed.appVersions || [],
     classAllowlist: parsed.classAllowlist || [],
@@ -823,7 +944,34 @@ function migrateStoreData(data: BridgeStoreData): BridgeStoreData {
 
   return {
     ...data,
-    userProfiles: data.userProfiles || [],
+    userProfiles: (data.userProfiles || []).map((profile) => ({
+      ...profile,
+      role: selectPrimaryUserRole(profile.roles?.length ? profile.roles : [profile.role]),
+      roles: normalizeRoles(profile.roles?.length ? profile.roles : [profile.role]),
+    })),
+    userRoleAssignments:
+      data.userRoleAssignments?.length
+        ? data.userRoleAssignments
+        : (data.userProfiles || []).flatMap((profile) =>
+            normalizeRoles(profile.roles?.length ? profile.roles : [profile.role]).map((role) => ({
+              userId: profile.userId,
+              role,
+              assignedBy: 'legacy-migration',
+              assignedAt: profile.createdAt,
+            }))
+          ),
+    classRecords:
+      data.classRecords?.length
+        ? data.classRecords
+        : [
+            {
+              classId: DEMO_CLASS_ID,
+              name: 'Demo Class',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+          ],
+    classMemberships: data.classMemberships || [],
     registryEntries: migratedRegistryEntries,
     appVersions: migratedVersions,
     chatSessions: data.chatSessions || [],

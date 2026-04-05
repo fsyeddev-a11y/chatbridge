@@ -3,6 +3,11 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { ZodError } from 'zod'
 import { createSupabaseAuthVerifier, getBearerToken, type AuthVerifier } from './auth.js'
 import {
+  getRequestUserEmail,
+  getRequestUserId,
+  requireAnyRole,
+} from './authorization.js'
+import {
   buildOAuthPopupResultHtml,
   createConfiguredOAuthService,
   decryptStoredOAuthToken,
@@ -165,6 +170,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       email: user.email,
     })
     request.headers['x-chatbridge-user-role'] = profile.role
+    request.headers['x-chatbridge-user-roles'] = profile.roles.join(',')
   })
 
   app.setErrorHandler(async (error, request, reply) => {
@@ -202,10 +208,10 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.get('/api/me', async (request, reply) => {
-    const userId = request.headers['x-chatbridge-user-id']
-    const userEmail = request.headers['x-chatbridge-user-email']
+    const userId = getRequestUserId(request)
+    const userEmail = getRequestUserEmail(request)
 
-    if (typeof userId !== 'string') {
+    if (!userId) {
       return reply.status(401).send({
         error: 'unauthorized',
       })
@@ -218,6 +224,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
 
     return {
       user: profile,
+      classes: await store.listClassesForUser(userId),
+      memberships: await store.listClassMembershipsForUser(userId),
     }
   })
 
@@ -327,12 +335,11 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.get('/api/developer/apps', async (request, reply) => {
-    const userId = request.headers['x-chatbridge-user-id']
-    if (typeof userId !== 'string') {
-      return reply.status(401).send({
-        error: 'unauthorized',
-      })
+    const denied = requireAnyRole(request, reply, ['developer', 'admin'])
+    if (denied) {
+      return denied
     }
+    const userId = getRequestUserId(request)!
 
     return {
       apps: await store.listRegistryEntriesForOwner(userId),
@@ -340,12 +347,11 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.get('/api/developer/review-actions', async (request, reply) => {
-    const userId = request.headers['x-chatbridge-user-id']
-    if (typeof userId !== 'string') {
-      return reply.status(401).send({
-        error: 'unauthorized',
-      })
+    const denied = requireAnyRole(request, reply, ['developer', 'admin'])
+    if (denied) {
+      return denied
     }
+    const userId = getRequestUserId(request)!
 
     return {
       actions: await store.listReviewActionsForOwner(userId),
@@ -367,6 +373,10 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.post('/api/registry/apps', async (request, reply) => {
+    const denied = requireAnyRole(request, reply, ['developer', 'admin'])
+    if (denied) {
+      return denied
+    }
     const limited = await applyMutationRateLimit({
       request,
       reply,
@@ -396,6 +406,10 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.post('/api/registry/apps/:appId/review', async (request, reply) => {
+    const denied = requireAnyRole(request, reply, ['admin'])
+    if (denied) {
+      return denied
+    }
     const limited = await applyMutationRateLimit({
       request,
       reply,
@@ -408,7 +422,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
 
     const { appId } = AppIdParamsSchema.parse(request.params)
-    const { reviewState, reviewerId, reviewNotes, version } = ReviewActionBodySchema.parse(request.body)
+    const { reviewState, reviewNotes, version } = ReviewActionBodySchema.parse(request.body)
+    const reviewerId = getRequestUserId(request)!
     const updated = await store.updateReviewState(appId, reviewState, reviewerId, reviewNotes, version)
     if (!updated) {
       return reply.status(404).send({
@@ -561,7 +576,11 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
   })
 
-  app.get('/api/classes/:classId/allowlist', async (request) => {
+  app.get('/api/classes/:classId/allowlist', async (request, reply) => {
+    const denied = requireAnyRole(request, reply, ['teacher', 'admin'])
+    if (denied) {
+      return denied
+    }
     const { classId } = ClassIdParamsSchema.parse(request.params)
     return {
       classId,
@@ -570,6 +589,10 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.post('/api/classes/:classId/allowlist', async (request, reply) => {
+    const denied = requireAnyRole(request, reply, ['teacher', 'admin'])
+    if (denied) {
+      return denied
+    }
     const limited = await applyMutationRateLimit({
       request,
       reply,
@@ -582,7 +605,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
 
     const { classId } = ClassIdParamsSchema.parse(request.params)
-    const { appId, enabledBy } = ClassAllowlistBodySchema.parse(request.body)
+    const { appId } = ClassAllowlistBodySchema.parse(request.body)
+    const enabledBy = getRequestUserId(request)!
     const allowlistEntry = await store.enableAppForClass(classId, appId, enabledBy)
     if (!allowlistEntry) {
       return reply.status(404).send({
@@ -597,6 +621,10 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.post('/api/classes/:classId/allowlist/:appId/disable', async (request, reply) => {
+    const denied = requireAnyRole(request, reply, ['teacher', 'admin'])
+    if (denied) {
+      return denied
+    }
     const limited = await applyMutationRateLimit({
       request,
       reply,
@@ -610,7 +638,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
 
     const { classId } = ClassIdParamsSchema.parse(request.params)
     const { appId } = AppIdParamsSchema.parse(request.params)
-    const { enabledBy } = ClassAllowlistToggleBodySchema.parse(request.body)
+    ClassAllowlistToggleBodySchema.parse(request.body)
+    const enabledBy = getRequestUserId(request)!
     const allowlistEntry = await store.disableAppForClass(classId, appId, enabledBy)
     if (!allowlistEntry) {
       return reply.status(404).send({
@@ -633,13 +662,21 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     })
   })
 
-  app.get('/api/audit/events', async () => {
+  app.get('/api/audit/events', async (request, reply) => {
+    const denied = requireAnyRole(request, reply, ['admin'])
+    if (denied) {
+      return denied
+    }
     return {
       events: await store.listAuditEvents(),
     }
   })
 
-  app.get('/api/review-actions', async () => {
+  app.get('/api/review-actions', async (request, reply) => {
+    const denied = requireAnyRole(request, reply, ['admin'])
+    if (denied) {
+      return denied
+    }
     return {
       actions: await store.listReviewActions(),
     }

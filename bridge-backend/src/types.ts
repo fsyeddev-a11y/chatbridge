@@ -1,5 +1,6 @@
 export type ReviewState = 'pending' | 'approved' | 'rejected' | 'suspended'
 export type UserRole = 'admin' | 'teacher' | 'student' | 'developer'
+export type ClassMembershipRole = 'teacher' | 'student'
 
 export type RuntimeAuthType = 'none' | 'api-key' | 'oauth2'
 export type OAuthProvider = 'google'
@@ -121,12 +122,38 @@ export type OAuthTokenRecord = {
   lastRefreshedAt?: number
 }
 
+export type UserRoleAssignment = {
+  userId: string
+  role: UserRole
+  assignedBy?: string
+  assignedAt: number
+  revokedAt?: number
+}
+
 export type UserProfile = {
   userId: string
   email?: string
   role: UserRole
+  roles: UserRole[]
   createdAt: number
   updatedAt: number
+}
+
+export type ClassRecord = {
+  classId: string
+  name: string
+  organizationId?: string
+  externalRef?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type ClassMembershipRecord = {
+  classId: string
+  userId: string
+  membershipRole: ClassMembershipRole
+  createdAt: number
+  removedAt?: number
 }
 
 export type ChatSessionMetaRecord = {

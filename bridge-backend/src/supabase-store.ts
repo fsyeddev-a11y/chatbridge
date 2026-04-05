@@ -5,6 +5,8 @@ import type {
   AppRegistryEntry,
   AppVersionRecord,
   AuditEvent,
+  ClassMembershipRecord,
+  ClassRecord,
   ChatSessionMetaRecord,
   ChatSessionRecord,
   BridgeSessionRecord,
@@ -14,7 +16,8 @@ import type {
   SessionBridgeState,
   UserProfile,
 } from './types.js'
-import { getAllowedOriginsForLaunchUrl, getConfiguredWeatherAppUrl, resolveDefaultUserRole, type BridgeStore } from './store.js'
+import { getAllowedOriginsForLaunchUrl, getConfiguredWeatherAppUrl, type BridgeStore } from './store.js'
+import { normalizeRoles, resolveDefaultUserRoles, selectPrimaryUserRole } from './authorization.js'
 
 type SupabaseBridgeStoreRow = {
   app_id: string
@@ -116,6 +119,33 @@ type SupabaseUserProfileRow = {
   updated_at: number
 }
 
+type SupabaseUserRoleRow = {
+  id: string
+  user_id: string
+  role: 'admin' | 'teacher' | 'student' | 'developer'
+  assigned_by: string | null
+  assigned_at: number
+  revoked_at: number | null
+}
+
+type SupabaseClassRow = {
+  id: string
+  name: string
+  organization_id: string | null
+  external_ref: string | null
+  created_at: number
+  updated_at: number
+}
+
+type SupabaseClassMembershipRow = {
+  id: string
+  class_id: string
+  user_id: string
+  membership_role: 'teacher' | 'student'
+  created_at: number
+  removed_at: number | null
+}
+
 type SupabaseChatSessionRow = {
   id: string
   user_id: string
@@ -139,8 +169,11 @@ type RegistryComposition = {
 type SupabaseSeedData = {
   registryEntries: AppRegistryEntry[]
   appVersions: AppVersionRecord[]
+  classRecords: ClassRecord[]
   classAllowlist: ClassAppAllowlist[]
 }
+
+const DEMO_CLASS_ID = 'demo-class'
 
 export function getSupabasePersistenceConfig() {
   return {
@@ -165,52 +198,122 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     await seedPromise
   }
 
+  async function listActiveUserRoles(userId: string) {
+    const { data, error } = await client
+      .from('user_roles')
+      .select('id, user_id, role, assigned_by, assigned_at, revoked_at')
+      .eq('user_id', userId)
+      .is('revoked_at', null)
+      .returns<SupabaseUserRoleRow[]>()
+
+    if (error) {
+      throw error
+    }
+
+    return normalizeRoles((data || []).map((row) => row.role))
+  }
+
+  async function ensureDefaultUserRoles(userId: string, email?: string) {
+    const now = Date.now()
+    const defaults = resolveDefaultUserRoles(email)
+    const existingRoles = await listActiveUserRoles(userId)
+    const missingRoles = defaults.filter((role) => !existingRoles.includes(role))
+
+    if (missingRoles.length) {
+      const { error } = await client.from('user_roles').upsert(
+        missingRoles.map((role) => ({
+          id: `${userId}:${role}`,
+          user_id: userId,
+          role,
+          assigned_by: 'system-bootstrap',
+          assigned_at: now,
+          revoked_at: null,
+        })),
+        { onConflict: 'id' }
+      )
+
+      if (error) {
+        throw error
+      }
+    }
+
+    return normalizeRoles([...existingRoles, ...defaults])
+  }
+
+  async function listActiveClassMembershipRows(userId: string) {
+    const { data, error } = await client
+      .from('class_memberships')
+      .select('id, class_id, user_id, membership_role, created_at, removed_at')
+      .eq('user_id', userId)
+      .is('removed_at', null)
+      .returns<SupabaseClassMembershipRow[]>()
+
+    if (error) {
+      throw error
+    }
+
+    return data || []
+  }
+
+  async function ensureDefaultClassMembership(userId: string, roles: ReturnType<typeof normalizeRoles>) {
+    const existingMemberships = await listActiveClassMembershipRows(userId)
+    if (existingMemberships.length > 0) {
+      return
+    }
+
+    const membershipRole = roles.includes('teacher') ? 'teacher' : roles.includes('student') ? 'student' : undefined
+    if (!membershipRole) {
+      return
+    }
+
+    const now = Date.now()
+    const { error } = await client.from('class_memberships').upsert(
+      {
+        id: `${userId}:${DEMO_CLASS_ID}:${membershipRole}`,
+        class_id: DEMO_CLASS_ID,
+        user_id: userId,
+        membership_role: membershipRole,
+        created_at: now,
+        removed_at: null,
+      },
+      { onConflict: 'id' }
+    )
+
+    if (error) {
+      throw error
+    }
+  }
+
   return {
     async getOrCreateUserProfile(user) {
       await ensureSeeded()
       const existing = await this.getUserProfile(user.userId)
       const now = Date.now()
-      if (existing) {
-        if (user.email && existing.email !== user.email) {
-          const { data, error } = await client
-            .from('user_profiles')
-            .update({
-              email: user.email,
-              updated_at: now,
-            })
-            .eq('user_id', user.userId)
-            .select('user_id, email, role, created_at, updated_at')
-            .single<SupabaseUserProfileRow>()
-
-          if (error) {
-            throw error
-          }
-
-          return mapUserProfileRow(data)
-        }
-
-        return existing
-      }
+      const roles = await ensureDefaultUserRoles(user.userId, user.email ?? existing?.email)
+      await ensureDefaultClassMembership(user.userId, roles)
 
       const row: SupabaseUserProfileRow = {
         user_id: user.userId,
-        email: user.email ?? null,
-        role: resolveDefaultUserRole(user.email),
-        created_at: now,
+        email: user.email ?? existing?.email ?? null,
+        role: selectPrimaryUserRole(roles),
+        created_at: existing?.createdAt ?? now,
         updated_at: now,
       }
 
-      const { data, error } = await client
-        .from('user_profiles')
-        .upsert(row, { onConflict: 'user_id' })
-        .select('user_id, email, role, created_at, updated_at')
-        .single<SupabaseUserProfileRow>()
+      const { error } = await client.from('user_profiles').upsert(row, { onConflict: 'user_id' })
 
       if (error) {
         throw error
       }
 
-      return mapUserProfileRow(data)
+      return {
+        userId: user.userId,
+        email: row.email ?? undefined,
+        role: row.role,
+        roles,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      }
     },
 
     async getUserProfile(userId) {
@@ -225,7 +328,40 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
         throw error
       }
 
-      return data ? mapUserProfileRow(data) : undefined
+      if (!data) {
+        return undefined
+      }
+
+      const roles = await listActiveUserRoles(userId)
+      return mapUserProfileRow(data, roles)
+    },
+
+    async listClassesForUser(userId) {
+      await ensureSeeded()
+      const membershipRows = await listActiveClassMembershipRows(userId)
+      const classIds = membershipRows.map((row) => row.class_id)
+      if (!classIds.length) {
+        return []
+      }
+
+      const { data, error } = await client
+        .from('classes')
+        .select('id, name, organization_id, external_ref, created_at, updated_at')
+        .in('id', classIds)
+        .order('created_at', { ascending: true })
+        .returns<SupabaseClassRow[]>()
+
+      if (error) {
+        throw error
+      }
+
+      return (data || []).map(mapClassRow)
+    },
+
+    async listClassMembershipsForUser(userId) {
+      await ensureSeeded()
+      const membershipRows = await listActiveClassMembershipRows(userId)
+      return membershipRows.map(mapClassMembershipRow)
     },
 
     async listRegistryEntries() {
@@ -827,6 +963,25 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 async function bootstrapSeedData(client: SupabaseClient) {
   const seedData = createSupabaseSeedData()
 
+  const missingClassEntries = await getMissingSeedClassEntries(client, seedData.classRecords)
+  if (missingClassEntries.length) {
+    const { error: seedClassesError } = await client.from('classes').upsert(
+      missingClassEntries.map((entry) => ({
+        id: entry.classId,
+        name: entry.name,
+        organization_id: entry.organizationId ?? null,
+        external_ref: entry.externalRef ?? null,
+        created_at: entry.createdAt,
+        updated_at: entry.updatedAt,
+      })),
+      { onConflict: 'id' }
+    )
+
+    if (seedClassesError) {
+      throw seedClassesError
+    }
+  }
+
   const missingRegistryEntries = await getMissingSeedRegistryEntries(client, seedData.registryEntries)
   if (missingRegistryEntries.length) {
     const { error: seedAppsError } = await client.from('apps').upsert(
@@ -890,6 +1045,26 @@ async function bootstrapSeedData(client: SupabaseClient) {
       throw seedAllowlistError
     }
   }
+}
+
+export async function getMissingSeedClassEntries(client: SupabaseClient, seedEntries: ClassRecord[]) {
+  const classIds = seedEntries.map((entry) => entry.classId)
+  if (!classIds.length) {
+    return []
+  }
+
+  const { data, error } = await client
+    .from('classes')
+    .select('id')
+    .in('id', classIds)
+    .returns<Array<Pick<SupabaseClassRow, 'id'>>>()
+
+  if (error) {
+    throw error
+  }
+
+  const existingIds = new Set((data || []).map((row) => row.id))
+  return seedEntries.filter((entry) => !existingIds.has(entry.classId))
 }
 
 export async function getMissingSeedRegistryEntries(client: SupabaseClient, seedEntries: AppRegistryEntry[]) {
@@ -1141,13 +1316,36 @@ function mapBridgeSessionRow(row: SupabaseBridgeSessionRow): BridgeSessionRecord
   }
 }
 
-function mapUserProfileRow(row: SupabaseUserProfileRow): UserProfile {
+function mapUserProfileRow(row: SupabaseUserProfileRow, roles?: UserProfile['roles']): UserProfile {
+  const effectiveRoles = normalizeRoles(roles?.length ? roles : [row.role])
   return {
     userId: row.user_id,
     email: row.email ?? undefined,
-    role: row.role,
+    role: selectPrimaryUserRole(effectiveRoles),
+    roles: effectiveRoles,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  }
+}
+
+function mapClassRow(row: SupabaseClassRow): ClassRecord {
+  return {
+    classId: row.id,
+    name: row.name,
+    organizationId: row.organization_id ?? undefined,
+    externalRef: row.external_ref ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function mapClassMembershipRow(row: SupabaseClassMembershipRow): ClassMembershipRecord {
+  return {
+    classId: row.class_id,
+    userId: row.user_id,
+    membershipRole: row.membership_role,
+    createdAt: row.created_at,
+    removedAt: row.removed_at ?? undefined,
   }
 }
 
@@ -1308,11 +1506,19 @@ function createSupabaseSeedData(): SupabaseSeedData {
   return {
     registryEntries,
     appVersions,
-    classAllowlist: [
-      { classId: 'demo-class', appId: 'chess', enabledBy: 'teacher-demo', enabledAt: now, disabledAt: undefined },
-      { classId: 'demo-class', appId: 'weather', enabledBy: 'teacher-demo', enabledAt: now, disabledAt: undefined },
+    classRecords: [
       {
-        classId: 'demo-class',
+        classId: DEMO_CLASS_ID,
+        name: 'Demo Class',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    classAllowlist: [
+      { classId: DEMO_CLASS_ID, appId: 'chess', enabledBy: 'teacher-demo', enabledAt: now, disabledAt: undefined },
+      { classId: DEMO_CLASS_ID, appId: 'weather', enabledBy: 'teacher-demo', enabledAt: now, disabledAt: undefined },
+      {
+        classId: DEMO_CLASS_ID,
         appId: 'google-classroom',
         enabledBy: 'teacher-demo',
         enabledAt: now,

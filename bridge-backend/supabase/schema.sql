@@ -125,6 +125,42 @@ create table if not exists user_profiles (
 create index if not exists user_profiles_role_idx on user_profiles(role);
 create index if not exists user_profiles_email_idx on user_profiles(email);
 
+create table if not exists user_roles (
+  id text primary key,
+  user_id text not null references user_profiles(user_id) on delete cascade,
+  role text not null check (role in ('admin', 'teacher', 'student', 'developer')),
+  assigned_by text,
+  assigned_at bigint not null,
+  revoked_at bigint
+);
+
+create unique index if not exists user_roles_user_role_active_idx on user_roles(user_id, role) where revoked_at is null;
+create index if not exists user_roles_user_id_idx on user_roles(user_id);
+
+create table if not exists classes (
+  id text primary key,
+  name text not null,
+  organization_id text,
+  external_ref text,
+  created_at bigint not null,
+  updated_at bigint not null
+);
+
+create table if not exists class_memberships (
+  id text primary key,
+  class_id text not null references classes(id) on delete cascade,
+  user_id text not null references user_profiles(user_id) on delete cascade,
+  membership_role text not null check (membership_role in ('teacher', 'student')),
+  created_at bigint not null,
+  removed_at bigint
+);
+
+create unique index if not exists class_memberships_class_user_role_active_idx
+  on class_memberships(class_id, user_id, membership_role)
+  where removed_at is null;
+create index if not exists class_memberships_user_id_idx on class_memberships(user_id);
+create index if not exists class_memberships_class_id_idx on class_memberships(class_id);
+
 create table if not exists chat_sessions (
   id text primary key,
   user_id text not null references user_profiles(user_id) on delete cascade,

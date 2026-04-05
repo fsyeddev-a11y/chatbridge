@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, it } from 'node:test'
+import { after, before, describe, it } from 'node:test'
 import { createApp, getConfiguredAllowedOrigins } from '../src/app.js'
 import type { ChatCompletionClient, ChatCompletionStreamClient } from '../src/chat.js'
 import type { OAuthService } from '../src/oauth.js'
@@ -17,9 +17,44 @@ import {
 } from '../src/store.js'
 
 describe('bridge-backend app', () => {
-  const allowAllAuth = async () => ({
-    id: 'user-1',
-    email: 'tester@example.com',
+  const originalAdminEmails = process.env.CHATBRIDGE_ADMIN_EMAILS
+  const originalTeacherEmails = process.env.CHATBRIDGE_TEACHER_EMAILS
+  const originalDeveloperEmails = process.env.CHATBRIDGE_DEVELOPER_EMAILS
+
+  const createAuthVerifier = (id: string, email: string) => async () => ({
+    id,
+    email,
+  })
+
+  const opsAuth = createAuthVerifier('user-1', 'tester@example.com')
+  const allowAllAuth = opsAuth
+  const studentAuth = createAuthVerifier('student-1', 'student@example.com')
+  const teacherAuth = createAuthVerifier('teacher-1', 'teacher@example.com')
+
+  before(() => {
+    process.env.CHATBRIDGE_ADMIN_EMAILS = 'tester@example.com,admin@example.com'
+    process.env.CHATBRIDGE_TEACHER_EMAILS = 'tester@example.com,teacher@example.com'
+    process.env.CHATBRIDGE_DEVELOPER_EMAILS = 'tester@example.com,developer@example.com'
+  })
+
+  after(() => {
+    if (originalAdminEmails === undefined) {
+      delete process.env.CHATBRIDGE_ADMIN_EMAILS
+    } else {
+      process.env.CHATBRIDGE_ADMIN_EMAILS = originalAdminEmails
+    }
+
+    if (originalTeacherEmails === undefined) {
+      delete process.env.CHATBRIDGE_TEACHER_EMAILS
+    } else {
+      process.env.CHATBRIDGE_TEACHER_EMAILS = originalTeacherEmails
+    }
+
+    if (originalDeveloperEmails === undefined) {
+      delete process.env.CHATBRIDGE_DEVELOPER_EMAILS
+    } else {
+      process.env.CHATBRIDGE_DEVELOPER_EMAILS = originalDeveloperEmails
+    }
   })
   const fakeChatClient: ChatCompletionClient = async () => ({
     content: 'Bridge-backed answer',
@@ -150,8 +185,8 @@ describe('bridge-backend app', () => {
     assert.equal(getResponse.json().session.name, 'Biology Notes')
   })
 
-  it('creates a user profile with a role when authenticated requests arrive', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
+  it('returns user roles, classes, and memberships for authenticated users', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: studentAuth, chatClient: fakeChatClient })
 
     const response = await app.inject({
       method: 'GET',
@@ -162,9 +197,26 @@ describe('bridge-backend app', () => {
     })
 
     assert.equal(response.statusCode, 200)
-    assert.equal(response.json().user.userId, 'user-1')
-    assert.equal(response.json().user.email, 'tester@example.com')
+    assert.equal(response.json().user.userId, 'student-1')
+    assert.equal(response.json().user.email, 'student@example.com')
     assert.equal(response.json().user.role, 'student')
+    assert.deepEqual(response.json().user.roles, ['student'])
+    assert.deepEqual(
+      response.json().classes.map((entry: { classId: string }) => entry.classId),
+      ['demo-class']
+    )
+    assert.deepEqual(
+      response.json().memberships.map((entry: { classId: string; membershipRole: string }) => ({
+        classId: entry.classId,
+        membershipRole: entry.membershipRole,
+      })),
+      [
+        {
+          classId: 'demo-class',
+          membershipRole: 'student',
+        },
+      ]
+    )
   })
 
   it('accepts structured audit events', async () => {
@@ -241,6 +293,89 @@ describe('bridge-backend app', () => {
     assert.deepEqual(response.json(), {
       error: 'unauthorized',
     })
+  })
+
+  it('forbids student users from privileged registry and allowlist routes', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: studentAuth, chatClient: fakeChatClient })
+
+    const registerResponse = await app.inject({
+      method: 'POST',
+      url: '/api/registry/apps',
+      headers: {
+        authorization: 'Bearer token-student',
+      },
+      payload: {
+        appId: 'story-builder',
+        name: 'AI Story Builder',
+        version: '1.0.0',
+        description: 'Structured story building for students.',
+        developerName: 'Developer',
+        executionModel: 'iframe',
+        allowedOrigins: ['https://apps.example.com'],
+        authType: 'none',
+        subjectTags: ['ELA'],
+        llmSafeFields: ['chapterTitle'],
+        tools: [
+          {
+            name: 'chatbridge_story_builder_open',
+            description: 'Open the story builder.',
+          },
+        ],
+      },
+    })
+
+    const reviewResponse = await app.inject({
+      method: 'POST',
+      url: '/api/registry/apps/chess/review',
+      headers: {
+        authorization: 'Bearer token-student',
+      },
+      payload: {
+        reviewState: 'approved',
+      },
+    })
+
+    const allowlistResponse = await app.inject({
+      method: 'POST',
+      url: '/api/classes/demo-class/allowlist',
+      headers: {
+        authorization: 'Bearer token-student',
+      },
+      payload: {
+        appId: 'weather',
+        enabledBy: 'student-1',
+      },
+    })
+
+    const developerAppsResponse = await app.inject({
+      method: 'GET',
+      url: '/api/developer/apps',
+      headers: {
+        authorization: 'Bearer token-student',
+      },
+    })
+
+    assert.equal(registerResponse.statusCode, 403)
+    assert.equal(reviewResponse.statusCode, 403)
+    assert.equal(allowlistResponse.statusCode, 403)
+    assert.equal(developerAppsResponse.statusCode, 403)
+  })
+
+  it('forbids teachers from platform admin review routes', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: teacherAuth, chatClient: fakeChatClient })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/registry/apps/chess/review',
+      headers: {
+        authorization: 'Bearer token-teacher',
+      },
+      payload: {
+        reviewState: 'suspended',
+      },
+    })
+
+    assert.equal(response.statusCode, 403)
   })
 
   it('persists seeded store data and appended audit events to disk', async () => {
