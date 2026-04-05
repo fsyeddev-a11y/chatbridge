@@ -150,6 +150,18 @@ function _setSessionCache(sessionId: string, updated: Session | null) {
   queryClient.setQueryData(QueryKeys.ChatSession(sessionId), updated)
 }
 
+function applySessionUpdater(sessionId: string, prev: Session | null | undefined, updater: Updater<Session>) {
+  if (!prev) {
+    throw new Error(`Session ${sessionId} not found`)
+  }
+
+  if (typeof updater === 'function') {
+    return updater(prev)
+  }
+
+  return { ...prev, ...updater }
+}
+
 // create session
 export async function createSession(newSession: Omit<Session, 'id'>, previousId?: string) {
   console.debug('chatStore', 'createSession', newSession)
@@ -165,7 +177,10 @@ export async function createSession(newSession: Omit<Session, 'id'>, previousId?
   if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
     const persisted = await upsertBackendSession(session, previousId)
     _setSessionCache(session.id, persisted.session)
-    queryClient.setQueryData(QueryKeys.ChatSessionsList, await _listSessionsMeta())
+    queryClient.setQueryData(QueryKeys.ChatSessionsList, (current: SessionMeta[] | undefined) => {
+      const source = current || []
+      return [...source, persisted.meta]
+    })
     return persisted.session
   }
   await storage.setItemNow(StorageKeyGenerator.session(session.id), session)
@@ -190,6 +205,11 @@ const sessionUpdateQueues: Record<string, UpdateQueue<Session>> = {}
 
 export async function updateSessionWithMessages(sessionId: string, updater: Updater<Session>) {
   console.debug('chatStore', 'updateSession', sessionId, updater)
+  if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
+    queryClient.setQueryData(QueryKeys.ChatSession(sessionId), (prev: Session | null | undefined) =>
+      applySessionUpdater(sessionId, prev, updater)
+    )
+  }
   if (!sessionUpdateQueues[sessionId]) {
     // do not use await here to avoid data race
     sessionUpdateQueues[sessionId] = new UpdateQueue<Session>(
@@ -198,7 +218,15 @@ export async function updateSessionWithMessages(sessionId: string, updater: Upda
         if (session) {
           console.debug('chatStore', 'persist session', sessionId)
           if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
-            await upsertBackendSession(session)
+            const persisted = await upsertBackendSession(session)
+            _setSessionCache(sessionId, persisted.session)
+            queryClient.setQueryData(QueryKeys.ChatSessionsList, (current: SessionMeta[] | undefined) => {
+              const source = current || []
+              if (source.some((entry) => entry.id === sessionId)) {
+                return source.map((entry) => (entry.id === sessionId ? persisted.meta : entry))
+              }
+              return [...source, persisted.meta]
+            })
           } else {
             await storage.setItemNow(StorageKeyGenerator.session(sessionId), session)
           }

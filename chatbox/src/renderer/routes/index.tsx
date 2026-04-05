@@ -126,7 +126,7 @@ function Index() {
 
       switchCurrentSession(newSession.id)
 
-      void submitNewUserMessage(newSession.id, {
+      await submitNewUserMessage(newSession.id, {
         newUserMsg: constructedMessage,
         needGenerating,
         onUserMessageReady,

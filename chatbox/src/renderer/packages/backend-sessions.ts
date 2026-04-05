@@ -27,6 +27,10 @@ export async function listBackendSessionsMeta() {
 }
 
 export async function getBackendSession(sessionId: string) {
+  if (sessionId === 'new') {
+    return null
+  }
+
   const headers = await getSupabaseAuthHeaders()
   const response = await fetch(getBackendSessionsUrl(`/${encodeURIComponent(sessionId)}`), {
     headers,
