@@ -218,7 +218,9 @@ export async function updateSessionWithMessages(sessionId: string, updater: Upda
           console.debug('chatStore', 'persist session', sessionId)
           if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
             const persisted = await upsertBackendSession(session)
-            _setSessionCache(sessionId, persisted.session)
+            // Keep the live in-memory session authoritative for rendering so older
+            // backend save responses do not clobber newer optimistic/cache-only updates.
+            _setSessionCache(sessionId, session)
             queryClient.setQueryData(QueryKeys.ChatSessionsList, (current: SessionMeta[] | undefined) => {
               const source = current || []
               if (source.some((entry) => entry.id === sessionId)) {
@@ -306,6 +308,10 @@ export async function updateSessionCache(sessionId: string, updater: Updater<Ses
       return { ...old, ...updater }
     }
   })
+  const nextSession = queryClient.getQueryData(QueryKeys.ChatSession(sessionId)) as Session | null | undefined
+  if (sessionUpdateQueues[sessionId] && nextSession) {
+    sessionUpdateQueues[sessionId].replaceState(nextSession)
+  }
 }
 
 export async function deleteSession(id: string) {

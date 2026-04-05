@@ -28,6 +28,14 @@ export class UpdateQueue<T extends object> {
     })
   }
 
+  replaceState(nextState: T | null): void {
+    this.state = nextState
+  }
+
+  getState(): T | null {
+    return this.state
+  }
+
   /** 可供测试时手动触发；正常情况下由微任务自动触发 */
   async flush(): Promise<void> {
     if (this.state === null) {
