@@ -53,11 +53,12 @@ export function resolveDefaultSchoolMembershipRoles(email?: string, roles: UserR
   const membershipRoles: SchoolMembershipRole[] = []
   if (isSchoolAdmin) {
     membershipRoles.push('school_admin')
+    membershipRoles.push('teacher')
   }
   if (roles.includes('teacher')) {
     membershipRoles.push('teacher')
   }
-  if (roles.includes('student') && !isSchoolAdmin) {
+  if ((roles.includes('student') || roles.includes('developer')) && !isSchoolAdmin) {
     membershipRoles.push('student')
   }
 

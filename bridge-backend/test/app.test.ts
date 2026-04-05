@@ -32,6 +32,7 @@ describe('bridge-backend app', () => {
   const studentAuth = createAuthVerifier('student-1', 'student@example.com')
   const teacherAuth = createAuthVerifier('teacher-1', 'teacher@example.com')
   const schoolAdminAuth = createAuthVerifier('school-admin-1', 'schooladmin@example.com')
+  const developerAuth = createAuthVerifier('developer-1', 'developer@example.com')
 
   before(() => {
     process.env.CHATBRIDGE_ADMIN_EMAILS = 'tester@example.com,admin@example.com'
@@ -229,6 +230,87 @@ describe('bridge-backend app', () => {
     assert.deepEqual(
       response.json().classes.map((entry: { classId: string }) => entry.classId),
       ['demo-class']
+    )
+    assert.deepEqual(
+      response.json().memberships.map((entry: { classId: string; membershipRole: string }) => ({
+        classId: entry.classId,
+        membershipRole: entry.membershipRole,
+      })),
+      [
+        {
+          classId: 'demo-class',
+          membershipRole: 'student',
+        },
+      ]
+    )
+  })
+
+  it('gives school admins demo teacher access so they can test class-scoped apps', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: schoolAdminAuth, chatClient: fakeChatClient })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(
+      response.json().schoolMemberships.map((entry: { schoolId: string; membershipRole: string }) => ({
+        schoolId: entry.schoolId,
+        membershipRole: entry.membershipRole,
+      })),
+      [
+        {
+          schoolId: 'demo-school',
+          membershipRole: 'school_admin',
+        },
+        {
+          schoolId: 'demo-school',
+          membershipRole: 'teacher',
+        },
+      ]
+    )
+    assert.deepEqual(
+      response.json().memberships.map((entry: { classId: string; membershipRole: string }) => ({
+        classId: entry.classId,
+        membershipRole: entry.membershipRole,
+      })),
+      [
+        {
+          classId: 'demo-class',
+          membershipRole: 'teacher',
+        },
+      ]
+    )
+  })
+
+  it('gives developers a demo student class membership for shelf testing', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: developerAuth, chatClient: fakeChatClient })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json().user.roles, ['developer'])
+    assert.deepEqual(
+      response.json().schoolMemberships.map((entry: { schoolId: string; membershipRole: string }) => ({
+        schoolId: entry.schoolId,
+        membershipRole: entry.membershipRole,
+      })),
+      [
+        {
+          schoolId: 'demo-school',
+          membershipRole: 'student',
+        },
+      ]
     )
     assert.deepEqual(
       response.json().memberships.map((entry: { classId: string; membershipRole: string }) => ({
