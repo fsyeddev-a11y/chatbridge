@@ -245,7 +245,7 @@ describe('bridge-backend app', () => {
     )
   })
 
-  it('gives school admins demo teacher access so they can test class-scoped apps', async () => {
+  it('treats school admins as strict school-scoped admins without extra teacher memberships', async () => {
     const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: schoolAdminAuth, chatClient: fakeChatClient })
 
     const response = await app.inject({
@@ -257,6 +257,8 @@ describe('bridge-backend app', () => {
     })
 
     assert.equal(response.statusCode, 200)
+    assert.equal(response.json().user.role, 'school_admin')
+    assert.deepEqual(response.json().user.roles, ['school_admin'])
     assert.deepEqual(
       response.json().schoolMemberships.map((entry: { schoolId: string; membershipRole: string }) => ({
         schoolId: entry.schoolId,
@@ -267,27 +269,12 @@ describe('bridge-backend app', () => {
           schoolId: 'demo-school',
           membershipRole: 'school_admin',
         },
-        {
-          schoolId: 'demo-school',
-          membershipRole: 'teacher',
-        },
       ]
     )
-    assert.deepEqual(
-      response.json().memberships.map((entry: { classId: string; membershipRole: string }) => ({
-        classId: entry.classId,
-        membershipRole: entry.membershipRole,
-      })),
-      [
-        {
-          classId: 'demo-class',
-          membershipRole: 'teacher',
-        },
-      ]
-    )
+    assert.deepEqual(response.json().memberships, [])
   })
 
-  it('gives developers a demo student class membership for shelf testing', async () => {
+  it('keeps developers out of school and class memberships unless separately assigned', async () => {
     const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: developerAuth, chatClient: fakeChatClient })
 
     const response = await app.inject({
@@ -300,30 +287,8 @@ describe('bridge-backend app', () => {
 
     assert.equal(response.statusCode, 200)
     assert.deepEqual(response.json().user.roles, ['developer'])
-    assert.deepEqual(
-      response.json().schoolMemberships.map((entry: { schoolId: string; membershipRole: string }) => ({
-        schoolId: entry.schoolId,
-        membershipRole: entry.membershipRole,
-      })),
-      [
-        {
-          schoolId: 'demo-school',
-          membershipRole: 'student',
-        },
-      ]
-    )
-    assert.deepEqual(
-      response.json().memberships.map((entry: { classId: string; membershipRole: string }) => ({
-        classId: entry.classId,
-        membershipRole: entry.membershipRole,
-      })),
-      [
-        {
-          classId: 'demo-class',
-          membershipRole: 'student',
-        },
-      ]
-    )
+    assert.deepEqual(response.json().schoolMemberships, [])
+    assert.deepEqual(response.json().memberships, [])
   })
 
   it('accepts structured audit events', async () => {

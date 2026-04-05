@@ -115,7 +115,9 @@ export default function ChatBridgeWorkspace() {
     const badges = new Set<string>()
 
     if (schoolAdminSchoolIds.length > 0) {
-      badges.add('school_admin')
+      if (!effectiveRoles.includes('school_admin')) {
+        badges.add('school_admin')
+      }
     }
     if (teacherClassIds.length > 0 && !effectiveRoles.includes('teacher')) {
       badges.add('teacher')

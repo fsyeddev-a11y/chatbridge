@@ -131,7 +131,7 @@ type SupabaseOAuthTokenRow = {
 type SupabaseUserProfileRow = {
   user_id: string
   email: string | null
-  role: 'admin' | 'teacher' | 'student' | 'developer'
+  role: 'admin' | 'school_admin' | 'teacher' | 'student' | 'developer'
   created_at: number
   updated_at: number
 }
@@ -139,7 +139,7 @@ type SupabaseUserProfileRow = {
 type SupabaseUserRoleRow = {
   id: string
   user_id: string
-  role: 'admin' | 'teacher' | 'student' | 'developer'
+  role: 'admin' | 'school_admin' | 'teacher' | 'student' | 'developer'
   assigned_by: string | null
   assigned_at: number
   revoked_at: number | null
@@ -235,46 +235,62 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     await seedPromise
   }
 
-  async function listActiveUserRoles(userId: string) {
+  async function listUserRoleRows(userId: string) {
     const { data, error } = await client
       .from('user_roles')
       .select('id, user_id, role, assigned_by, assigned_at, revoked_at')
       .eq('user_id', userId)
-      .is('revoked_at', null)
       .returns<SupabaseUserRoleRow[]>()
 
     if (error) {
       throw error
     }
 
-    return normalizeRoles((data || []).map((row) => row.role))
+    return data || []
+  }
+
+  async function listActiveUserRoles(userId: string) {
+    const rows = await listUserRoleRows(userId)
+    return normalizeRoles(rows.filter((row) => !row.revoked_at).map((row) => row.role))
   }
 
   async function ensureDefaultUserRoles(userId: string, email?: string) {
     const now = Date.now()
     const defaults = resolveDefaultUserRoles(email)
-    const existingRoles = await listActiveUserRoles(userId)
-    const missingRoles = defaults.filter((role) => !existingRoles.includes(role))
+    const roleRows = await listUserRoleRows(userId)
+    const existingRoles = normalizeRoles(roleRows.filter((row) => !row.revoked_at).map((row) => row.role))
+    const desiredRoleSet = new Set(defaults)
+    const updates: SupabaseUserRoleRow[] = []
 
-    if (missingRoles.length) {
-      const { error } = await client.from('user_roles').upsert(
-        missingRoles.map((role) => ({
-          id: `${userId}:${role}`,
-          user_id: userId,
-          role,
-          assigned_by: 'system-bootstrap',
-          assigned_at: now,
-          revoked_at: null,
-        })),
-        { onConflict: 'id' }
-      )
+    for (const row of roleRows) {
+      if (!row.revoked_at && row.assigned_by === 'system-bootstrap' && !desiredRoleSet.has(row.role)) {
+        updates.push({
+          ...row,
+          revoked_at: now,
+        })
+      }
+    }
+
+    for (const role of defaults.filter((entry) => !existingRoles.includes(entry))) {
+      updates.push({
+        id: `${userId}:${role}`,
+        user_id: userId,
+        role,
+        assigned_by: 'system-bootstrap',
+        assigned_at: now,
+        revoked_at: null,
+      })
+    }
+
+    if (updates.length) {
+      const { error } = await client.from('user_roles').upsert(updates, { onConflict: 'id' })
 
       if (error) {
         throw error
       }
     }
 
-    return normalizeRoles([...existingRoles, ...defaults])
+    return listActiveUserRoles(userId)
   }
 
   async function listActiveSchoolMembershipRows(userId: string) {
@@ -294,37 +310,48 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 
   async function ensureDefaultSchoolMemberships(userId: string, email: string | undefined, roles: ReturnType<typeof normalizeRoles>) {
     const existingMemberships = await listActiveSchoolMembershipRows(userId)
-    const existingRoles = new Set(existingMemberships.map((membership) => membership.membership_role))
     const membershipRoles = resolveDefaultSchoolMembershipRoles(email, roles)
-    if (!membershipRoles.length) {
-      return existingMemberships.map((membership) => membership.membership_role)
+    const desiredRoles = new Set(membershipRoles)
+    const demoMemberships = existingMemberships.filter((membership) => membership.school_id === DEMO_SCHOOL_ID)
+    const updates: SupabaseSchoolMembershipRow[] = []
+    const now = Date.now()
+
+    for (const membership of demoMemberships) {
+      if (!desiredRoles.has(membership.membership_role)) {
+        updates.push({
+          ...membership,
+          removed_at: now,
+        })
+      }
     }
 
-    const missingMembershipRoles = membershipRoles.filter((membershipRole) => !existingRoles.has(membershipRole))
-    if (missingMembershipRoles.length) {
-      const now = Date.now()
-      const { error } = await client.from('school_memberships').upsert(
-        missingMembershipRoles.map((membershipRole) => ({
-          id: `${userId}:${DEMO_SCHOOL_ID}:${membershipRole}`,
-          school_id: DEMO_SCHOOL_ID,
-          user_id: userId,
-          membership_role: membershipRole,
-          created_at: now,
-          removed_at: null,
-        })),
-        { onConflict: 'id' }
-      )
+    const activeDemoRoles = new Set(
+      demoMemberships.filter((membership) => !membership.removed_at).map((membership) => membership.membership_role)
+    )
+
+    for (const membershipRole of membershipRoles) {
+      if (activeDemoRoles.has(membershipRole)) {
+        continue
+      }
+      updates.push({
+        id: `${userId}:${DEMO_SCHOOL_ID}:${membershipRole}`,
+        school_id: DEMO_SCHOOL_ID,
+        user_id: userId,
+        membership_role: membershipRole,
+        created_at: now,
+        removed_at: null,
+      })
+    }
+
+    if (updates.length) {
+      const { error } = await client.from('school_memberships').upsert(updates, { onConflict: 'id' })
 
       if (error) {
         throw error
       }
     }
 
-    return ['school_admin', 'teacher', 'student'].filter((role) =>
-      new Set([...existingMemberships.map((membership) => membership.membership_role), ...membershipRoles]).has(
-        role as 'school_admin' | 'teacher' | 'student'
-      )
-    ) as Array<'school_admin' | 'teacher' | 'student'>
+    return (await listActiveSchoolMembershipRows(userId)).map((membership) => membership.membership_role)
   }
 
   async function listActiveClassMembershipRows(userId: string) {
@@ -351,30 +378,37 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
       : schoolMembershipRoles.includes('student')
         ? 'student'
         : undefined
-    if (!membershipRole) {
-      return
-    }
-
     const existingMemberships = await listActiveClassMembershipRows(userId)
-    if (existingMemberships.some((membership) => membership.class_id === DEMO_CLASS_ID && membership.membership_role === membershipRole)) {
-      return
+    const demoMemberships = existingMemberships.filter((membership) => membership.class_id === DEMO_CLASS_ID)
+    const updates: SupabaseClassMembershipRow[] = []
+    const now = Date.now()
+
+    for (const membership of demoMemberships) {
+      if (!membershipRole || membership.membership_role !== membershipRole) {
+        updates.push({
+          ...membership,
+          removed_at: now,
+        })
+      }
     }
 
-    const now = Date.now()
-    const { error } = await client.from('class_memberships').upsert(
-      {
+    if (membershipRole && !demoMemberships.some((membership) => !membership.removed_at && membership.membership_role === membershipRole)) {
+      updates.push({
         id: `${userId}:${DEMO_CLASS_ID}:${membershipRole}`,
         class_id: DEMO_CLASS_ID,
         user_id: userId,
         membership_role: membershipRole,
         created_at: now,
         removed_at: null,
-      },
-      { onConflict: 'id' }
-    )
+      })
+    }
 
-    if (error) {
-      throw error
+    if (updates.length) {
+      const { error } = await client.from('class_memberships').upsert(updates, { onConflict: 'id' })
+
+      if (error) {
+        throw error
+      }
     }
   }
 

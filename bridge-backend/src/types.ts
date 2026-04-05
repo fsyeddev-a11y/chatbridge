@@ -1,5 +1,5 @@
 export type ReviewState = 'pending' | 'approved' | 'rejected' | 'suspended'
-export type UserRole = 'admin' | 'teacher' | 'student' | 'developer'
+export type UserRole = 'admin' | 'school_admin' | 'teacher' | 'student' | 'developer'
 export type SchoolMembershipRole = 'school_admin' | 'teacher' | 'student'
 export type ClassMembershipRole = 'teacher' | 'student'
 

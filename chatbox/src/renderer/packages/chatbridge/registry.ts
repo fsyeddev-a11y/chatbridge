@@ -95,8 +95,8 @@ export type ChatBridgeWorkspaceUser = {
   user: {
     userId: string
     email?: string
-    role: 'admin' | 'teacher' | 'student' | 'developer'
-    roles: Array<'admin' | 'teacher' | 'student' | 'developer'>
+    role: 'admin' | 'school_admin' | 'teacher' | 'student' | 'developer'
+    roles: Array<'admin' | 'school_admin' | 'teacher' | 'student' | 'developer'>
     createdAt: number
     updatedAt: number
   }

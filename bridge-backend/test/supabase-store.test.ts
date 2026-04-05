@@ -91,13 +91,25 @@ function createUserBootstrapClient(operationLog: string[]) {
                 return Promise.resolve({ data: seededClasses, error: null })
               }
               if (table === 'user_roles') {
-                return Promise.resolve({ data: userRoles.get(String(state.user_id)) || [], error: null })
+                const rows = userRoles.get(String(state.user_id)) || []
+                return Promise.resolve({
+                  data: state.revoked_at === null ? rows.filter((row) => row.revoked_at === null) : rows,
+                  error: null,
+                })
               }
               if (table === 'school_memberships') {
-                return Promise.resolve({ data: schoolMemberships.get(String(state.user_id)) || [], error: null })
+                const rows = schoolMemberships.get(String(state.user_id)) || []
+                return Promise.resolve({
+                  data: state.removed_at === null ? rows.filter((row) => row.removed_at === null) : rows,
+                  error: null,
+                })
               }
               if (table === 'class_memberships') {
-                return Promise.resolve({ data: classMemberships.get(String(state.user_id)) || [], error: null })
+                const rows = classMemberships.get(String(state.user_id)) || []
+                return Promise.resolve({
+                  data: state.removed_at === null ? rows.filter((row) => row.removed_at === null) : rows,
+                  error: null,
+                })
               }
               return Promise.resolve({ data: [], error: null })
             },
@@ -150,19 +162,21 @@ function createUserBootstrapClient(operationLog: string[]) {
               )
             }
           } else if (table === 'class_memberships') {
-            const row = payload as {
+            const rows = Array.isArray(payload) ? payload : [payload]
+            for (const row of rows as Array<{
               id: string
               class_id: string
               user_id: string
               membership_role: 'teacher' | 'student'
               created_at: number
               removed_at: number | null
+            }>) {
+              const existing = classMemberships.get(row.user_id) || []
+              classMemberships.set(
+                row.user_id,
+                [...existing.filter((entry) => entry.id !== row.id), row]
+              )
             }
-            const existing = classMemberships.get(row.user_id) || []
-            classMemberships.set(
-              row.user_id,
-              [...existing.filter((entry) => entry.id !== row.id), row]
-            )
           }
 
           return Promise.resolve({ error: null })
@@ -695,7 +709,7 @@ describe('supabase seed bootstrap helpers', () => {
     assert.ok(appWriteIndex < versionWriteIndex)
   })
 
-  it('backfills missing school and class memberships when env-based elevated access is added later', async () => {
+  it('replaces stale demo memberships when env-based school admin access is added later', async () => {
     const originalSchoolAdminEmails = process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS
     const originalTeacherEmails = process.env.CHATBRIDGE_TEACHER_EMAILS
     const operationLog: string[] = []
@@ -721,25 +735,21 @@ describe('supabase seed bootstrap helpers', () => {
       )
 
       process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS = 'teacheradmin@example.com'
-      process.env.CHATBRIDGE_TEACHER_EMAILS = 'teacheradmin@example.com'
 
-      await store.getOrCreateUserProfile({
+      const upgradedProfile = await store.getOrCreateUserProfile({
         userId: 'late-upgrade-user',
         email: 'teacheradmin@example.com',
       })
 
+      assert.equal(upgradedProfile.role, 'school_admin')
+      assert.deepEqual(upgradedProfile.roles, ['school_admin'])
       assert.deepEqual(
         (await store.listSchoolMembershipsForUser('late-upgrade-user'))
           .map((membership) => membership.membershipRole)
           .sort(),
-        ['school_admin', 'student', 'teacher']
+        ['school_admin']
       )
-      assert.deepEqual(
-        (await store.listClassMembershipsForUser('late-upgrade-user'))
-          .map((membership) => membership.membershipRole)
-          .sort(),
-        ['student', 'teacher']
-      )
+      assert.deepEqual(await store.listClassMembershipsForUser('late-upgrade-user'), [])
     } finally {
       if (originalSchoolAdminEmails === undefined) {
         delete process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS

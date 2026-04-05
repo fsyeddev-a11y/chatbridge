@@ -405,7 +405,17 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
   function ensureDefaultRoleAssignments(userId: string, email?: string) {
     const now = Date.now()
     const defaultRoles = resolveDefaultUserRoles(email)
+    const desiredRoleSet = new Set(defaultRoles)
     let changed = false
+
+    for (const assignment of userRoleAssignments.filter(
+      (entry) => entry.userId === userId && !entry.revokedAt && entry.assignedBy === 'system-bootstrap'
+    )) {
+      if (!desiredRoleSet.has(assignment.role)) {
+        assignment.revokedAt = now
+        changed = true
+      }
+    }
 
     for (const role of defaultRoles) {
       const existing = userRoleAssignments.find(
@@ -473,18 +483,29 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
   }
 
   function ensureDefaultSchoolMemberships(userId: string, email: string | undefined, roles: ReturnType<typeof getActiveUserRoles>) {
-    const existingMemberships = listActiveSchoolMembershipsForUser(userId)
-    const existingRoles = new Set(existingMemberships.map((membership) => membership.membershipRole))
     const membershipRoles = resolveDefaultSchoolMembershipRoles(email, roles)
-    if (!membershipRoles.length) {
-      return false
-    }
-
+    const desiredRoles = new Set(membershipRoles)
+    const existingMemberships = listActiveSchoolMembershipsForUser(userId)
+    const demoMemberships = existingMemberships.filter((membership) => membership.schoolId === DEMO_SCHOOL_ID)
     ensureDemoSchoolExists()
     const now = Date.now()
     let changed = false
+
+    for (const membership of demoMemberships) {
+      if (!desiredRoles.has(membership.membershipRole)) {
+        membership.removedAt = now
+        changed = true
+      }
+    }
+
+    const activeDemoRoles = new Set(
+      listActiveSchoolMembershipsForUser(userId)
+        .filter((membership) => membership.schoolId === DEMO_SCHOOL_ID)
+        .map((membership) => membership.membershipRole)
+    )
+
     for (const membershipRole of membershipRoles) {
-      if (existingRoles.has(membershipRole)) {
+      if (activeDemoRoles.has(membershipRole)) {
         continue
       }
       schoolMemberships.push({
@@ -504,13 +525,28 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
       : schoolMembershipRoles.includes('student')
         ? 'student'
         : undefined
-    if (!membershipRole) {
-      return false
+    const existingMemberships = listActiveClassMembershipsForUser(userId)
+    const demoMemberships = existingMemberships.filter((membership) => membership.classId === DEMO_CLASS_ID)
+    const now = Date.now()
+    let changed = false
+
+    for (const membership of demoMemberships) {
+      if (!membershipRole || membership.membershipRole !== membershipRole) {
+        membership.removedAt = now
+        changed = true
+      }
     }
 
-    const existingMemberships = listActiveClassMembershipsForUser(userId)
-    if (existingMemberships.some((membership) => membership.classId === DEMO_CLASS_ID && membership.membershipRole === membershipRole)) {
-      return false
+    if (!membershipRole) {
+      return changed
+    }
+
+    if (
+      listActiveClassMembershipsForUser(userId).some(
+        (membership) => membership.classId === DEMO_CLASS_ID && membership.membershipRole === membershipRole
+      )
+    ) {
+      return changed
     }
 
     ensureDemoClassExists()
@@ -518,7 +554,7 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
       classId: DEMO_CLASS_ID,
       userId,
       membershipRole,
-      createdAt: Date.now(),
+      createdAt: now,
     })
     return true
   }

@@ -11,7 +11,7 @@ function getConfiguredUserRoleEmails(envValue: string | undefined) {
   )
 }
 
-const ROLE_PRIORITY: UserRole[] = ['admin', 'teacher', 'developer', 'student']
+const ROLE_PRIORITY: UserRole[] = ['admin', 'school_admin', 'teacher', 'developer', 'student']
 
 export function normalizeRoles(roles: UserRole[]) {
   return ROLE_PRIORITY.filter((role) => roles.includes(role))
@@ -24,12 +24,16 @@ export function selectPrimaryUserRole(roles: UserRole[]): UserRole {
 export function resolveDefaultUserRoles(email?: string): UserRole[] {
   const normalizedEmail = email?.trim().toLowerCase()
   const adminEmails = getConfiguredUserRoleEmails(process.env.CHATBRIDGE_ADMIN_EMAILS)
+  const schoolAdminEmails = getConfiguredUserRoleEmails(process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS)
   const teacherEmails = getConfiguredUserRoleEmails(process.env.CHATBRIDGE_TEACHER_EMAILS)
   const developerEmails = getConfiguredUserRoleEmails(process.env.CHATBRIDGE_DEVELOPER_EMAILS)
 
   const roles: UserRole[] = []
   if (normalizedEmail && adminEmails.has(normalizedEmail)) {
     roles.push('admin')
+  }
+  if (normalizedEmail && schoolAdminEmails.has(normalizedEmail)) {
+    roles.push('school_admin')
   }
   if (normalizedEmail && teacherEmails.has(normalizedEmail)) {
     roles.push('teacher')
@@ -46,19 +50,14 @@ export function resolveDefaultUserRoles(email?: string): UserRole[] {
 }
 
 export function resolveDefaultSchoolMembershipRoles(email?: string, roles: UserRole[] = []): SchoolMembershipRole[] {
-  const normalizedEmail = email?.trim().toLowerCase()
-  const schoolAdminEmails = getConfiguredUserRoleEmails(process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS)
-  const isSchoolAdmin = Boolean(normalizedEmail && schoolAdminEmails.has(normalizedEmail))
-
   const membershipRoles: SchoolMembershipRole[] = []
-  if (isSchoolAdmin) {
+  if (roles.includes('school_admin')) {
     membershipRoles.push('school_admin')
-    membershipRoles.push('teacher')
   }
   if (roles.includes('teacher')) {
     membershipRoles.push('teacher')
   }
-  if ((roles.includes('student') || roles.includes('developer')) && !isSchoolAdmin) {
+  if (roles.includes('student')) {
     membershipRoles.push('student')
   }
 
@@ -69,7 +68,7 @@ export function parseRequestUserRoles(headerValue: string | string[] | undefined
   const values = Array.isArray(headerValue) ? headerValue : typeof headerValue === 'string' ? headerValue.split(',') : []
   const roles = values
     .map((value) => value.trim())
-    .filter((value): value is UserRole => ['admin', 'teacher', 'student', 'developer'].includes(value))
+    .filter((value): value is UserRole => ['admin', 'school_admin', 'teacher', 'student', 'developer'].includes(value))
 
   return normalizeRoles(roles)
 }
