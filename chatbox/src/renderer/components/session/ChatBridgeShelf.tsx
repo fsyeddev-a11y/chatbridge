@@ -62,6 +62,7 @@ function ChatBridgeShelfCard({ app, session, isActive }: ChatBridgeShelfCardProp
             <Button
               size="compact-sm"
               variant="filled"
+              disabled={!isRunnable}
               onClick={() =>
                 void startChatBridgeOAuthFlow(app.appId, session.id)
                   .then(() =>
@@ -76,7 +77,7 @@ function ChatBridgeShelfCard({ app, session, isActive }: ChatBridgeShelfCardProp
                   })
               }
             >
-              Connect
+              {isRunnable ? 'Connect' : 'Unavailable'}
             </Button>
           ) : (
             <Button
