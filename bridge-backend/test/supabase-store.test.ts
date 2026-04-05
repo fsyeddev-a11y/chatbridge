@@ -694,4 +694,64 @@ describe('supabase seed bootstrap helpers', () => {
     assert.notEqual(versionWriteIndex, -1)
     assert.ok(appWriteIndex < versionWriteIndex)
   })
+
+  it('backfills missing school and class memberships when env-based elevated access is added later', async () => {
+    const originalSchoolAdminEmails = process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS
+    const originalTeacherEmails = process.env.CHATBRIDGE_TEACHER_EMAILS
+    const operationLog: string[] = []
+
+    delete process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS
+    delete process.env.CHATBRIDGE_TEACHER_EMAILS
+
+    try {
+      const store = createSupabaseBridgeStore(createUserBootstrapClient(operationLog))
+
+      await store.getOrCreateUserProfile({
+        userId: 'late-upgrade-user',
+        email: 'teacheradmin@example.com',
+      })
+
+      assert.deepEqual(
+        (await store.listSchoolMembershipsForUser('late-upgrade-user')).map((membership) => membership.membershipRole),
+        ['student']
+      )
+      assert.deepEqual(
+        (await store.listClassMembershipsForUser('late-upgrade-user')).map((membership) => membership.membershipRole),
+        ['student']
+      )
+
+      process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS = 'teacheradmin@example.com'
+      process.env.CHATBRIDGE_TEACHER_EMAILS = 'teacheradmin@example.com'
+
+      await store.getOrCreateUserProfile({
+        userId: 'late-upgrade-user',
+        email: 'teacheradmin@example.com',
+      })
+
+      assert.deepEqual(
+        (await store.listSchoolMembershipsForUser('late-upgrade-user'))
+          .map((membership) => membership.membershipRole)
+          .sort(),
+        ['school_admin', 'student', 'teacher']
+      )
+      assert.deepEqual(
+        (await store.listClassMembershipsForUser('late-upgrade-user'))
+          .map((membership) => membership.membershipRole)
+          .sort(),
+        ['student', 'teacher']
+      )
+    } finally {
+      if (originalSchoolAdminEmails === undefined) {
+        delete process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS
+      } else {
+        process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS = originalSchoolAdminEmails
+      }
+
+      if (originalTeacherEmails === undefined) {
+        delete process.env.CHATBRIDGE_TEACHER_EMAILS
+      } else {
+        process.env.CHATBRIDGE_TEACHER_EMAILS = originalTeacherEmails
+      }
+    }
+  })
 })

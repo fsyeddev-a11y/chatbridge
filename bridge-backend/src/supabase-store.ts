@@ -294,33 +294,37 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 
   async function ensureDefaultSchoolMemberships(userId: string, email: string | undefined, roles: ReturnType<typeof normalizeRoles>) {
     const existingMemberships = await listActiveSchoolMembershipRows(userId)
-    if (existingMemberships.length > 0) {
+    const existingRoles = new Set(existingMemberships.map((membership) => membership.membership_role))
+    const membershipRoles = resolveDefaultSchoolMembershipRoles(email, roles)
+    if (!membershipRoles.length) {
       return existingMemberships.map((membership) => membership.membership_role)
     }
 
-    const membershipRoles = resolveDefaultSchoolMembershipRoles(email, roles)
-    if (!membershipRoles.length) {
-      return []
+    const missingMembershipRoles = membershipRoles.filter((membershipRole) => !existingRoles.has(membershipRole))
+    if (missingMembershipRoles.length) {
+      const now = Date.now()
+      const { error } = await client.from('school_memberships').upsert(
+        missingMembershipRoles.map((membershipRole) => ({
+          id: `${userId}:${DEMO_SCHOOL_ID}:${membershipRole}`,
+          school_id: DEMO_SCHOOL_ID,
+          user_id: userId,
+          membership_role: membershipRole,
+          created_at: now,
+          removed_at: null,
+        })),
+        { onConflict: 'id' }
+      )
+
+      if (error) {
+        throw error
+      }
     }
 
-    const now = Date.now()
-    const { error } = await client.from('school_memberships').upsert(
-      membershipRoles.map((membershipRole) => ({
-        id: `${userId}:${DEMO_SCHOOL_ID}:${membershipRole}`,
-        school_id: DEMO_SCHOOL_ID,
-        user_id: userId,
-        membership_role: membershipRole,
-        created_at: now,
-        removed_at: null,
-      })),
-      { onConflict: 'id' }
-    )
-
-    if (error) {
-      throw error
-    }
-
-    return membershipRoles
+    return ['school_admin', 'teacher', 'student'].filter((role) =>
+      new Set([...existingMemberships.map((membership) => membership.membership_role), ...membershipRoles]).has(
+        role as 'school_admin' | 'teacher' | 'student'
+      )
+    ) as Array<'school_admin' | 'teacher' | 'student'>
   }
 
   async function listActiveClassMembershipRows(userId: string) {
@@ -342,17 +346,17 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     userId: string,
     schoolMembershipRoles: Array<'school_admin' | 'teacher' | 'student'>
   ) {
-    const existingMemberships = await listActiveClassMembershipRows(userId)
-    if (existingMemberships.length > 0) {
-      return
-    }
-
     const membershipRole = schoolMembershipRoles.includes('teacher')
       ? 'teacher'
       : schoolMembershipRoles.includes('student')
         ? 'student'
         : undefined
     if (!membershipRole) {
+      return
+    }
+
+    const existingMemberships = await listActiveClassMembershipRows(userId)
+    if (existingMemberships.some((membership) => membership.class_id === DEMO_CLASS_ID && membership.membership_role === membershipRole)) {
       return
     }
 

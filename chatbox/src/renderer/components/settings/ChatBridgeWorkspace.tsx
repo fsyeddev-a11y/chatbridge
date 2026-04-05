@@ -111,6 +111,18 @@ export default function ChatBridgeWorkspace() {
   const canUseAdminWorkspace = effectiveRoles.includes('admin')
   const canUseSchoolAdminWorkspace = canUseAdminWorkspace || schoolAdminSchoolIds.length > 0
   const canUseTeacherWorkspace = canUseAdminWorkspace || teacherClassIds.length > 0
+  const scopedBadges = useMemo(() => {
+    const badges = new Set<string>()
+
+    if (schoolAdminSchoolIds.length > 0) {
+      badges.add('school_admin')
+    }
+    if (teacherClassIds.length > 0 && !effectiveRoles.includes('teacher')) {
+      badges.add('teacher')
+    }
+
+    return [...badges]
+  }, [schoolAdminSchoolIds.length, teacherClassIds.length, effectiveRoles])
 
   const managedSchools = useMemo(() => {
     if (!workspaceUser) {
@@ -338,6 +350,11 @@ export default function ChatBridgeWorkspace() {
         <Group gap={8}>
           {workspaceUser.user.roles.map((role) => (
             <Badge key={role} variant="light">
+              {role}
+            </Badge>
+          ))}
+          {scopedBadges.map((role) => (
+            <Badge key={role} variant="outline">
               {role}
             </Badge>
           ))}
