@@ -45,6 +45,25 @@ function isUserCancelledGeneration(error: Error) {
   return error.name === 'AbortError' || message.includes('aborted') || message.includes('aborterror')
 }
 
+async function refreshSessionFromBackendBestEffort(sessionId: string) {
+  if (!USE_CHATBRIDGE_BACKEND_CHAT) {
+    return
+  }
+
+  try {
+    await chatStore.refreshSessionFromBackend(sessionId)
+  } catch (error) {
+    // A page refresh can interrupt this canonicalization fetch. At that point the
+    // assistant message is already finalized, so we should not turn a completed
+    // response into a bogus assistant error.
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      return
+    }
+
+    console.warn('Failed to refresh backend session after generation finalization', error)
+  }
+}
+
 /**
  * Get session-level web browsing setting
  * Returns user's explicit setting if set, otherwise returns default based on provider
@@ -294,7 +313,7 @@ export async function generate(
         }
         await modifyMessage(sessionId, targetMsg, true)
         if (USE_CHATBRIDGE_BACKEND_CHAT) {
-          await chatStore.refreshSessionFromBackend(sessionId)
+          void refreshSessionFromBackendBestEffort(sessionId)
         }
         break
       }
@@ -355,7 +374,7 @@ export async function generate(
       }
       await modifyMessage(sessionId, targetMsg, true)
       if (USE_CHATBRIDGE_BACKEND_CHAT) {
-        await chatStore.refreshSessionFromBackend(sessionId)
+        void refreshSessionFromBackendBestEffort(sessionId)
       }
       return
     }
@@ -398,7 +417,7 @@ export async function generate(
     }
     await modifyMessage(sessionId, targetMsg, true)
     if (USE_CHATBRIDGE_BACKEND_CHAT) {
-      await chatStore.refreshSessionFromBackend(sessionId)
+      void refreshSessionFromBackendBestEffort(sessionId)
     }
   }
 }
