@@ -768,9 +768,18 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     const { bridgeState, effectiveClassId, approvedApps, traceId, orchestratedMessages, toolDefinitions } =
       await prepareChatInvocation(body, authenticatedUserId)
     const abortController = new AbortController()
-    request.raw.on('close', () => {
-      abortController.abort()
-    })
+    const abortStream = () => {
+      if (!abortController.signal.aborted) {
+        abortController.abort()
+      }
+    }
+    const handleClientDisconnect = () => {
+      if (!reply.raw.writableEnded) {
+        abortStream()
+      }
+    }
+    request.raw.on('aborted', abortStream)
+    reply.raw.on('close', handleClientDisconnect)
 
     await store.appendAuditEvent({
       timestamp: Date.now(),
@@ -912,6 +921,9 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
         traceId,
       })
       reply.raw.end()
+    } finally {
+      request.raw.off('aborted', abortStream)
+      reply.raw.off('close', handleClientDisconnect)
     }
 
     return reply
