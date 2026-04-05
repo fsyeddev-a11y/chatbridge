@@ -31,6 +31,8 @@ import {
   AppManifestSchema,
   AuditEventSchema,
   BackendChatRequestSchema,
+  ChatSessionOrderBodySchema,
+  ChatSessionUpsertBodySchema,
   BridgeSessionUpsertBodySchema,
   ClassAllowlistBodySchema,
   ClassAllowlistToggleBodySchema,
@@ -157,6 +159,12 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     if (user.email) {
       request.headers['x-chatbridge-user-email'] = user.email
     }
+
+    const profile = await store.getOrCreateUserProfile({
+      userId: user.id,
+      email: user.email,
+    })
+    request.headers['x-chatbridge-user-role'] = profile.role
   })
 
   app.setErrorHandler(async (error, request, reply) => {
@@ -191,6 +199,125 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       status: 'ok',
       service: 'bridge-backend',
     }
+  })
+
+  app.get('/api/me', async (request, reply) => {
+    const userId = request.headers['x-chatbridge-user-id']
+    const userEmail = request.headers['x-chatbridge-user-email']
+
+    if (typeof userId !== 'string') {
+      return reply.status(401).send({
+        error: 'unauthorized',
+      })
+    }
+
+    const profile = await store.getOrCreateUserProfile({
+      userId,
+      email: typeof userEmail === 'string' ? userEmail : undefined,
+    })
+
+    return {
+      user: profile,
+    }
+  })
+
+  app.get('/api/chat-sessions', async (request, reply) => {
+    const userId = request.headers['x-chatbridge-user-id']
+    if (typeof userId !== 'string') {
+      return reply.status(401).send({ error: 'unauthorized' })
+    }
+
+    return {
+      sessions: await store.listChatSessions(userId),
+    }
+  })
+
+  app.get('/api/chat-sessions/:sessionId', async (request, reply) => {
+    const { sessionId } = SessionIdParamsSchema.parse(request.params)
+    const userId = request.headers['x-chatbridge-user-id']
+    if (typeof userId !== 'string') {
+      return reply.status(401).send({ error: 'unauthorized' })
+    }
+
+    const session = await store.getChatSession(sessionId, userId)
+    if (!session) {
+      return reply.status(404).send({ error: 'session_not_found' })
+    }
+
+    return {
+      session: session.session,
+      meta: {
+        id: session.id,
+        name: session.name,
+        type: session.type,
+        starred: session.starred,
+        hidden: session.hidden,
+        assistantAvatarKey: session.assistantAvatarKey,
+        picUrl: session.picUrl,
+      },
+      updatedAt: session.updatedAt,
+      createdAt: session.createdAt,
+    }
+  })
+
+  app.put('/api/chat-sessions/:sessionId', async (request, reply) => {
+    const { sessionId } = SessionIdParamsSchema.parse(request.params)
+    const { session, previousSessionId } = ChatSessionUpsertBodySchema.parse(request.body)
+    const userId = request.headers['x-chatbridge-user-id']
+    const userEmail = request.headers['x-chatbridge-user-email']
+    if (typeof userId !== 'string') {
+      return reply.status(401).send({ error: 'unauthorized' })
+    }
+    if (session.id !== sessionId) {
+      return reply.status(400).send({ error: 'session_id_mismatch' })
+    }
+
+    const record = await store.upsertChatSession(session, {
+      userId,
+      email: typeof userEmail === 'string' ? userEmail : undefined,
+    }, previousSessionId)
+
+    return reply.status(200).send({
+      session: record.session,
+      meta: {
+        id: record.id,
+        name: record.name,
+        type: record.type,
+        starred: record.starred,
+        hidden: record.hidden,
+        assistantAvatarKey: record.assistantAvatarKey,
+        picUrl: record.picUrl,
+      },
+      updatedAt: record.updatedAt,
+      createdAt: record.createdAt,
+    })
+  })
+
+  app.put('/api/chat-sessions/reorder', async (request, reply) => {
+    const { sessionIds } = ChatSessionOrderBodySchema.parse(request.body)
+    const userId = request.headers['x-chatbridge-user-id']
+    if (typeof userId !== 'string') {
+      return reply.status(401).send({ error: 'unauthorized' })
+    }
+
+    return {
+      sessions: await store.reorderChatSessions(userId, sessionIds),
+    }
+  })
+
+  app.delete('/api/chat-sessions/:sessionId', async (request, reply) => {
+    const { sessionId } = SessionIdParamsSchema.parse(request.params)
+    const userId = request.headers['x-chatbridge-user-id']
+    if (typeof userId !== 'string') {
+      return reply.status(401).send({ error: 'unauthorized' })
+    }
+
+    const deleted = await store.deleteChatSession(sessionId, userId)
+    if (!deleted) {
+      return reply.status(404).send({ error: 'session_not_found' })
+    }
+
+    return reply.status(204).send()
   })
 
   app.get('/api/registry/apps', async () => {

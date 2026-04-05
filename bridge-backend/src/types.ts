@@ -1,4 +1,5 @@
 export type ReviewState = 'pending' | 'approved' | 'rejected' | 'suspended'
+export type UserRole = 'admin' | 'teacher' | 'student' | 'developer'
 
 export type RuntimeAuthType = 'none' | 'api-key' | 'oauth2'
 export type OAuthProvider = 'google'
@@ -118,4 +119,30 @@ export type OAuthTokenRecord = {
   scopes: string[]
   createdAt: number
   lastRefreshedAt?: number
+}
+
+export type UserProfile = {
+  userId: string
+  email?: string
+  role: UserRole
+  createdAt: number
+  updatedAt: number
+}
+
+export type ChatSessionMetaRecord = {
+  id: string
+  userId: string
+  name: string
+  type?: 'chat' | 'picture'
+  starred?: boolean
+  hidden?: boolean
+  assistantAvatarKey?: string
+  picUrl?: string
+  orderIndex: number
+  createdAt: number
+  updatedAt: number
+}
+
+export type ChatSessionRecord = ChatSessionMetaRecord & {
+  session: Record<string, unknown>
 }

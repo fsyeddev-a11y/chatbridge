@@ -5,17 +5,26 @@ import type {
   AppRegistryEntry,
   AppVersionRecord,
   AuditEvent,
+  ChatSessionMetaRecord,
+  ChatSessionRecord,
   BridgeSessionRecord,
   ClassAppAllowlist,
   OAuthTokenRecord,
   ReviewAction,
   SessionBridgeState,
+  UserProfile,
+  UserRole,
 } from './types.js'
 import { createSupabaseBridgeStore } from './supabase-store.js'
 
 type Awaitable<T> = T | Promise<T>
 
 export type BridgeStore = {
+  getOrCreateUserProfile(user: {
+    userId: string
+    email?: string
+  }): Awaitable<UserProfile>
+  getUserProfile(userId: string): Awaitable<UserProfile | undefined>
   listRegistryEntries(): Awaitable<AppRegistryEntry[]>
   listRegistryEntriesForOwner(userId: string): Awaitable<AppRegistryEntry[]>
   getRegistryEntry(appId: string): Awaitable<AppRegistryEntry | undefined>
@@ -46,9 +55,22 @@ export type BridgeStore = {
   getOAuthToken(userId: string, appId: string, provider: OAuthTokenRecord['provider']): Awaitable<OAuthTokenRecord | undefined>
   upsertOAuthToken(record: OAuthTokenRecord): Awaitable<OAuthTokenRecord>
   deleteOAuthToken(userId: string, appId: string, provider: OAuthTokenRecord['provider']): Awaitable<boolean>
+  listChatSessions(userId: string): Awaitable<ChatSessionMetaRecord[]>
+  getChatSession(sessionId: string, userId: string): Awaitable<ChatSessionRecord | undefined>
+  upsertChatSession(
+    session: Record<string, unknown>,
+    user: {
+      userId: string
+      email?: string
+    },
+    previousSessionId?: string
+  ): Awaitable<ChatSessionRecord>
+  reorderChatSessions(userId: string, sessionIds: string[]): Awaitable<ChatSessionMetaRecord[]>
+  deleteChatSession(sessionId: string, userId: string): Awaitable<boolean>
 }
 
 export type BridgeStoreData = {
+  userProfiles: UserProfile[]
   registryEntries: AppRegistryEntry[]
   appVersions: AppVersionRecord[]
   classAllowlist: ClassAppAllowlist[]
@@ -56,6 +78,7 @@ export type BridgeStoreData = {
   reviewActions: ReviewAction[]
   bridgeSessions: BridgeSessionRecord[]
   oauthTokens: OAuthTokenRecord[]
+  chatSessions: ChatSessionRecord[]
 }
 
 export type BridgeStoreDriver = 'file' | 'supabase'
@@ -219,6 +242,7 @@ function createSeedData(): BridgeStoreData {
   }))
 
   return {
+    userProfiles: [],
     registryEntries,
     appVersions,
     classAllowlist: [
@@ -230,14 +254,45 @@ function createSeedData(): BridgeStoreData {
     reviewActions: [],
     bridgeSessions: [],
     oauthTokens: [],
+    chatSessions: [],
   }
 }
 
+function getConfiguredUserRoleEmails(envValue: string | undefined) {
+  return new Set(
+    (envValue || '')
+      .split(',')
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean)
+  )
+}
+
+export function resolveDefaultUserRole(email?: string): UserRole {
+  const normalizedEmail = email?.trim().toLowerCase()
+  const adminEmails = getConfiguredUserRoleEmails(process.env.CHATBRIDGE_ADMIN_EMAILS)
+  const teacherEmails = getConfiguredUserRoleEmails(process.env.CHATBRIDGE_TEACHER_EMAILS)
+  const developerEmails = getConfiguredUserRoleEmails(process.env.CHATBRIDGE_DEVELOPER_EMAILS)
+
+  if (normalizedEmail && adminEmails.has(normalizedEmail)) {
+    return 'admin'
+  }
+  if (normalizedEmail && teacherEmails.has(normalizedEmail)) {
+    return 'teacher'
+  }
+  if (normalizedEmail && developerEmails.has(normalizedEmail)) {
+    return 'developer'
+  }
+
+  return 'student'
+}
+
 function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: BridgeStoreData) => void): BridgeStore {
-  const { registryEntries, appVersions, classAllowlist, auditEvents, reviewActions, bridgeSessions, oauthTokens } = data
+  const { userProfiles, registryEntries, appVersions, classAllowlist, auditEvents, reviewActions, bridgeSessions, oauthTokens, chatSessions } =
+    data
 
   function persist() {
     onWrite?.({
+      userProfiles,
       registryEntries,
       appVersions,
       classAllowlist,
@@ -245,6 +300,7 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
       reviewActions,
       bridgeSessions,
       oauthTokens,
+      chatSessions,
     })
   }
 
@@ -280,7 +336,88 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
     return rebuilt
   }
 
+  function getUserProfileInternal(userId: string) {
+    return userProfiles.find((profile) => profile.userId === userId)
+  }
+
+  function buildChatSessionMeta(sessionRecord: ChatSessionRecord): ChatSessionMetaRecord {
+    return {
+      id: sessionRecord.id,
+      userId: sessionRecord.userId,
+      name: sessionRecord.name,
+      type: sessionRecord.type,
+      starred: sessionRecord.starred,
+      hidden: sessionRecord.hidden,
+      assistantAvatarKey: sessionRecord.assistantAvatarKey,
+      picUrl: sessionRecord.picUrl,
+      orderIndex: sessionRecord.orderIndex,
+      createdAt: sessionRecord.createdAt,
+      updatedAt: sessionRecord.updatedAt,
+    }
+  }
+
+  function normalizeChatSessionRecord(session: Record<string, unknown>, userId: string, orderIndex: number, existing?: ChatSessionRecord) {
+    const now = Date.now()
+    const id = typeof session.id === 'string' ? session.id : existing?.id
+    const name = typeof session.name === 'string' && session.name.trim() ? session.name : existing?.name || 'Untitled'
+    if (!id) {
+      throw new Error('Chat session id is required')
+    }
+
+    return {
+      id,
+      userId,
+      name,
+      type: session.type === 'chat' || session.type === 'picture' ? session.type : existing?.type,
+      starred: typeof session.starred === 'boolean' ? session.starred : existing?.starred,
+      hidden: typeof session.hidden === 'boolean' ? session.hidden : existing?.hidden,
+      assistantAvatarKey:
+        typeof session.assistantAvatarKey === 'string' ? session.assistantAvatarKey : existing?.assistantAvatarKey,
+      picUrl: typeof session.picUrl === 'string' ? session.picUrl : existing?.picUrl,
+      orderIndex,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      session,
+    } satisfies ChatSessionRecord
+  }
+
+  function listChatSessionRecords(userId: string) {
+    return chatSessions
+      .filter((session) => session.userId === userId)
+      .sort((left, right) => left.orderIndex - right.orderIndex || left.createdAt - right.createdAt)
+  }
+
+  function getChatSessionRecord(sessionId: string, userId: string) {
+    return chatSessions.find((session) => session.id === sessionId && session.userId === userId)
+  }
+
   return {
+    getOrCreateUserProfile(user) {
+      const existing = getUserProfileInternal(user.userId)
+      const now = Date.now()
+      if (existing) {
+        if (user.email && existing.email !== user.email) {
+          existing.email = user.email
+          existing.updatedAt = now
+          persist()
+        }
+        return existing
+      }
+
+      const nextProfile: UserProfile = {
+        userId: user.userId,
+        email: user.email,
+        role: resolveDefaultUserRole(user.email),
+        createdAt: now,
+        updatedAt: now,
+      }
+      userProfiles.push(nextProfile)
+      persist()
+      return nextProfile
+    },
+    getUserProfile(userId) {
+      return getUserProfileInternal(userId)
+    },
     listRegistryEntries() {
       return registryEntries
     },
@@ -490,6 +627,71 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
       persist()
       return true
     },
+    listChatSessions(userId) {
+      return listChatSessionRecords(userId).map(buildChatSessionMeta)
+    },
+    getChatSession(sessionId, userId) {
+      return getChatSessionRecord(sessionId, userId)
+    },
+    upsertChatSession(session, user, previousSessionId) {
+      this.getOrCreateUserProfile(user)
+      const existing = getChatSessionRecord(String(session.id || ''), user.userId)
+      let orderIndex = existing?.orderIndex
+
+      if (orderIndex === undefined) {
+        const userSessions = listChatSessionRecords(user.userId)
+        if (previousSessionId) {
+          const previous = userSessions.find((entry) => entry.id === previousSessionId)
+          if (previous) {
+            orderIndex = previous.orderIndex + 1
+            for (const candidate of userSessions) {
+              if (candidate.orderIndex >= orderIndex) {
+                candidate.orderIndex += 1
+              }
+            }
+          }
+        }
+
+        if (orderIndex === undefined) {
+          const maxOrderIndex = userSessions.reduce((max, candidate) => Math.max(max, candidate.orderIndex), -1)
+          orderIndex = maxOrderIndex + 1
+        }
+      }
+
+      const nextRecord = normalizeChatSessionRecord(session, user.userId, orderIndex, existing)
+      if (existing) {
+        const existingIndex = chatSessions.indexOf(existing)
+        chatSessions[existingIndex] = nextRecord
+      } else {
+        chatSessions.push(nextRecord)
+      }
+
+      persist()
+      return nextRecord
+    },
+    reorderChatSessions(userId, sessionIds) {
+      const userSessions = listChatSessionRecords(userId)
+      const knownIds = new Set(userSessions.map((session) => session.id))
+      const nextOrderIds = [...sessionIds.filter((id) => knownIds.has(id)), ...userSessions.map((session) => session.id).filter((id) => !sessionIds.includes(id))]
+      nextOrderIds.forEach((sessionId, index) => {
+        const session = userSessions.find((entry) => entry.id === sessionId)
+        if (session) {
+          session.orderIndex = index
+          session.updatedAt = Date.now()
+        }
+      })
+      persist()
+      return listChatSessionRecords(userId).map(buildChatSessionMeta)
+    },
+    deleteChatSession(sessionId, userId) {
+      const existingIndex = chatSessions.findIndex((session) => session.id === sessionId && session.userId === userId)
+      if (existingIndex === -1) {
+        return false
+      }
+      chatSessions.splice(existingIndex, 1)
+      persist()
+      return true
+    },
   }
 }
 
@@ -533,6 +735,7 @@ function readStoreFile(filePath: string): BridgeStoreData {
   const parsed = JSON.parse(raw) as Partial<BridgeStoreData>
 
   return migrateStoreData({
+    userProfiles: parsed.userProfiles || [],
     registryEntries: parsed.registryEntries || [],
     appVersions: parsed.appVersions || [],
     classAllowlist: parsed.classAllowlist || [],
@@ -540,6 +743,7 @@ function readStoreFile(filePath: string): BridgeStoreData {
     reviewActions: parsed.reviewActions || [],
     bridgeSessions: parsed.bridgeSessions || [],
     oauthTokens: parsed.oauthTokens || [],
+    chatSessions: parsed.chatSessions || [],
   })
 }
 
@@ -619,8 +823,10 @@ function migrateStoreData(data: BridgeStoreData): BridgeStoreData {
 
   return {
     ...data,
+    userProfiles: data.userProfiles || [],
     registryEntries: migratedRegistryEntries,
     appVersions: migratedVersions,
+    chatSessions: data.chatSessions || [],
   }
 }
 

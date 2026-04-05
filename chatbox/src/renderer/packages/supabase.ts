@@ -1,5 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
+import { getDefaultStore } from 'jotai'
 import { useEffect, useState } from 'react'
+import { currentSessionIdAtom } from '@/stores/atoms/sessionAtoms'
+import queryClient from '@/stores/queryClient'
 
 const supabaseUrl = process.env.SUPABASE_URL
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY
@@ -70,6 +73,19 @@ export function useSupabaseAuthState() {
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!active) {
         return
+      }
+
+      queryClient.removeQueries({
+        predicate: (query) => {
+          const queryKey = query.queryKey
+          return (
+            (Array.isArray(queryKey) && queryKey[0] === 'chat-sessions-list') ||
+            (Array.isArray(queryKey) && queryKey[0] === 'chat-session')
+          )
+        },
+      })
+      if (!session) {
+        getDefaultStore().set(currentSessionIdAtom, null)
       }
 
       setIsAuthenticated(Boolean(session))

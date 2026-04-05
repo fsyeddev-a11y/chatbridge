@@ -17,6 +17,14 @@ import compact from 'lodash/compact'
 import isEmpty from 'lodash/isEmpty'
 import { useMemo } from 'react'
 import { v4 as uuidv4 } from 'uuid'
+import {
+  deleteBackendSession,
+  getBackendSession,
+  listBackendSessionsMeta,
+  reorderBackendSessions,
+  upsertBackendSession,
+} from '@/packages/backend-sessions'
+import { USE_CHATBRIDGE_BACKEND_SESSIONS } from '@/variables'
 import storage, { StorageKey } from '@/storage'
 import { StorageKeyGenerator } from '@/storage/StoreStorage'
 import * as defaults from '../../shared/defaults'
@@ -44,6 +52,9 @@ const QueryKeys = {
 // list sessions meta
 async function _listSessionsMeta(): Promise<SessionMeta[]> {
   console.debug('chatStore', 'listSessionsMeta')
+  if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
+    return await listBackendSessionsMeta()
+  }
   try {
     const sessionMetaList = await storage.getItem<SessionMeta[]>(StorageKey.ChatSessionsList, [])
     // session list showing order: reversed, pinned at top
@@ -57,7 +68,7 @@ async function _listSessionsMeta(): Promise<SessionMeta[]> {
 
 const listSessionsMetaQueryOptions = {
   queryKey: QueryKeys.ChatSessionsList,
-  queryFn: () => _listSessionsMeta().then(sortSessions),
+  queryFn: () => _listSessionsMeta().then((sessions) => (USE_CHATBRIDGE_BACKEND_SESSIONS ? sessions : sortSessions(sessions))),
   staleTime: Infinity,
 }
 
@@ -73,6 +84,14 @@ export function useSessionList() {
 let sessionListUpdateQueue: UpdateQueue<SessionMeta[]> | null = null
 
 export async function updateSessionList(updater: UpdaterFn<SessionMeta[]>) {
+  if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
+    const sessions = await _listSessionsMeta()
+    const nextSessions = updater(sessions)
+    const reordered = await reorderBackendSessions(nextSessions.map((session) => session.id))
+    queryClient.setQueryData(QueryKeys.ChatSessionsList, reordered)
+    return
+  }
+
   if (!sessionListUpdateQueue) {
     sessionListUpdateQueue = new UpdateQueue<SessionMeta[]>(
       () => _listSessionsMeta(),
@@ -91,6 +110,9 @@ export async function updateSessionList(updater: UpdaterFn<SessionMeta[]>) {
 // get session
 async function _getSessionById(id: string): Promise<Session | null> {
   console.debug('chatStore', 'getSessionById', id)
+  if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
+    return await getBackendSession(id)
+  }
   const storageKey = StorageKeyGenerator.session(id)
   try {
     const session = await storage.getItem<Session | null>(storageKey, null)
@@ -140,6 +162,12 @@ export async function createSession(newSession: Omit<Session, 'id'>, previousId?
       ...newSession.settings,
     },
   }
+  if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
+    const persisted = await upsertBackendSession(session, previousId)
+    _setSessionCache(session.id, persisted.session)
+    queryClient.setQueryData(QueryKeys.ChatSessionsList, await _listSessionsMeta())
+    return persisted.session
+  }
   await storage.setItemNow(StorageKeyGenerator.session(session.id), session)
   const sMeta = getSessionMeta(session)
   await updateSessionList((sessions) => {
@@ -169,7 +197,11 @@ export async function updateSessionWithMessages(sessionId: string, updater: Upda
       async (session) => {
         if (session) {
           console.debug('chatStore', 'persist session', sessionId)
-          await storage.setItemNow(StorageKeyGenerator.session(sessionId), session)
+          if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
+            await upsertBackendSession(session)
+          } else {
+            await storage.setItemNow(StorageKeyGenerator.session(sessionId), session)
+          }
         }
       }
     )
@@ -189,12 +221,23 @@ export async function updateSessionWithMessages(sessionId: string, updater: Upda
     }
   })
   if (needUpdateSessionList) {
-    await updateSessionList((sessions) => {
-      if (!sessions) {
-        throw new Error('Session list not found')
-      }
-      return sessions.map((session) => (session.id === sessionId ? getSessionMeta(updated) : session))
-    })
+    if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
+      queryClient.setQueryData(QueryKeys.ChatSessionsList, (current: SessionMeta[] | undefined) => {
+        const nextMeta = getSessionMeta(updated)
+        const source = current || []
+        if (source.some((session) => session.id === sessionId)) {
+          return source.map((session) => (session.id === sessionId ? nextMeta : session))
+        }
+        return [...source, nextMeta]
+      })
+    } else {
+      await updateSessionList((sessions) => {
+        if (!sessions) {
+          throw new Error('Session list not found')
+        }
+        return sessions.map((session) => (session.id === sessionId ? getSessionMeta(updated) : session))
+      })
+    }
   }
   _setSessionCache(sessionId, updated)
   return updated
@@ -235,7 +278,11 @@ export async function updateSessionCache(sessionId: string, updater: Updater<Ses
 
 export async function deleteSession(id: string) {
   console.debug('chatStore', 'deleteSession', id)
-  await storage.removeItem(StorageKeyGenerator.session(id))
+  if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
+    await deleteBackendSession(id)
+  } else {
+    await storage.removeItem(StorageKeyGenerator.session(id))
+  }
   _setSessionCache(id, null)
   await updateSessionList((sessions) => {
     if (!sessions) {
@@ -574,6 +621,12 @@ function cleanupEmptyForkBranches(
  */
 export async function recoverSessionList() {
   console.debug('chatStore', 'recoverSessionList')
+
+  if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
+    const sessions = await _listSessionsMeta()
+    queryClient.setQueryData(QueryKeys.ChatSessionsList, sessions)
+    return { recovered: sessions.length, failed: 0 }
+  }
 
   // Get all storage keys
   const allKeys = await storage.getAllKeys()

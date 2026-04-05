@@ -5,13 +5,16 @@ import type {
   AppRegistryEntry,
   AppVersionRecord,
   AuditEvent,
+  ChatSessionMetaRecord,
+  ChatSessionRecord,
   BridgeSessionRecord,
   ClassAppAllowlist,
   OAuthTokenRecord,
   ReviewAction,
   SessionBridgeState,
+  UserProfile,
 } from './types.js'
-import { getAllowedOriginsForLaunchUrl, getConfiguredWeatherAppUrl, type BridgeStore } from './store.js'
+import { getAllowedOriginsForLaunchUrl, getConfiguredWeatherAppUrl, resolveDefaultUserRole, type BridgeStore } from './store.js'
 
 type SupabaseBridgeStoreRow = {
   app_id: string
@@ -105,6 +108,29 @@ type SupabaseOAuthTokenRow = {
   last_refreshed_at: number | null
 }
 
+type SupabaseUserProfileRow = {
+  user_id: string
+  email: string | null
+  role: 'admin' | 'teacher' | 'student' | 'developer'
+  created_at: number
+  updated_at: number
+}
+
+type SupabaseChatSessionRow = {
+  id: string
+  user_id: string
+  name: string
+  type: 'chat' | 'picture' | null
+  starred: boolean | null
+  hidden: boolean | null
+  assistant_avatar_key: string | null
+  pic_url: string | null
+  order_index: number
+  payload: Record<string, unknown>
+  created_at: number
+  updated_at: number
+}
+
 type RegistryComposition = {
   appRows: SupabaseBridgeStoreRow[]
   versionRows: SupabaseAppVersionRow[]
@@ -140,6 +166,68 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
   }
 
   return {
+    async getOrCreateUserProfile(user) {
+      await ensureSeeded()
+      const existing = await this.getUserProfile(user.userId)
+      const now = Date.now()
+      if (existing) {
+        if (user.email && existing.email !== user.email) {
+          const { data, error } = await client
+            .from('user_profiles')
+            .update({
+              email: user.email,
+              updated_at: now,
+            })
+            .eq('user_id', user.userId)
+            .select('user_id, email, role, created_at, updated_at')
+            .single<SupabaseUserProfileRow>()
+
+          if (error) {
+            throw error
+          }
+
+          return mapUserProfileRow(data)
+        }
+
+        return existing
+      }
+
+      const row: SupabaseUserProfileRow = {
+        user_id: user.userId,
+        email: user.email ?? null,
+        role: resolveDefaultUserRole(user.email),
+        created_at: now,
+        updated_at: now,
+      }
+
+      const { data, error } = await client
+        .from('user_profiles')
+        .upsert(row, { onConflict: 'user_id' })
+        .select('user_id, email, role, created_at, updated_at')
+        .single<SupabaseUserProfileRow>()
+
+      if (error) {
+        throw error
+      }
+
+      return mapUserProfileRow(data)
+    },
+
+    async getUserProfile(userId) {
+      await ensureSeeded()
+      const { data, error } = await client
+        .from('user_profiles')
+        .select('user_id, email, role, created_at, updated_at')
+        .eq('user_id', userId)
+        .maybeSingle<SupabaseUserProfileRow>()
+
+      if (error) {
+        throw error
+      }
+
+      return data ? mapUserProfileRow(data) : undefined
+    },
+
     async listRegistryEntries() {
       await ensureSeeded()
       const { appRows, versionRows } = await readRegistryComposition(client)
@@ -592,6 +680,147 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 
       return Boolean(count)
     },
+    async listChatSessions(userId) {
+      await ensureSeeded()
+      const { data, error } = await client
+        .from('chat_sessions')
+        .select('id, user_id, name, type, starred, hidden, assistant_avatar_key, pic_url, order_index, payload, created_at, updated_at')
+        .eq('user_id', userId)
+        .order('order_index', { ascending: true })
+        .returns<SupabaseChatSessionRow[]>()
+
+      if (error) {
+        throw error
+      }
+
+      return (data || []).map(mapChatSessionMetaRow)
+    },
+    async getChatSession(sessionId, userId) {
+      await ensureSeeded()
+      const { data, error } = await client
+        .from('chat_sessions')
+        .select('id, user_id, name, type, starred, hidden, assistant_avatar_key, pic_url, order_index, payload, created_at, updated_at')
+        .eq('id', sessionId)
+        .eq('user_id', userId)
+        .maybeSingle<SupabaseChatSessionRow>()
+
+      if (error) {
+        throw error
+      }
+
+      return data ? mapChatSessionRow(data) : undefined
+    },
+    async upsertChatSession(session, user, previousSessionId) {
+      await ensureSeeded()
+      await this.getOrCreateUserProfile(user)
+      const existing = await this.getChatSession(String(session.id || ''), user.userId)
+      let orderIndex = existing?.orderIndex
+
+      if (orderIndex === undefined) {
+        const userSessions = await this.listChatSessions(user.userId)
+        if (previousSessionId) {
+          const previous = userSessions.find((entry) => entry.id === previousSessionId)
+          if (previous) {
+            const nextOrderIndex = previous.orderIndex + 1
+            orderIndex = nextOrderIndex
+            const sessionsToShift = userSessions.filter((entry) => entry.orderIndex >= nextOrderIndex)
+            if (sessionsToShift.length) {
+              const { error: shiftError } = await client
+                .from('chat_sessions')
+                .upsert(
+                  sessionsToShift.map((entry) => ({
+                    id: entry.id,
+                    user_id: user.userId,
+                    order_index: entry.orderIndex + 1,
+                  })),
+                  { onConflict: 'id' }
+                )
+
+              if (shiftError) {
+                throw shiftError
+              }
+            }
+          }
+        }
+
+        if (orderIndex === undefined) {
+          orderIndex = userSessions.length ? Math.max(...userSessions.map((entry) => entry.orderIndex)) + 1 : 0
+        }
+      }
+
+      const now = Date.now()
+      const row: SupabaseChatSessionRow = {
+        id: String(session.id),
+        user_id: user.userId,
+        name: typeof session.name === 'string' && session.name.trim() ? session.name : existing?.name || 'Untitled',
+        type: session.type === 'chat' || session.type === 'picture' ? session.type : existing?.type || null,
+        starred: typeof session.starred === 'boolean' ? session.starred : existing?.starred ?? null,
+        hidden: typeof session.hidden === 'boolean' ? session.hidden : existing?.hidden ?? null,
+        assistant_avatar_key:
+          typeof session.assistantAvatarKey === 'string'
+            ? session.assistantAvatarKey
+            : existing?.assistantAvatarKey || null,
+        pic_url: typeof session.picUrl === 'string' ? session.picUrl : existing?.picUrl || null,
+        order_index: orderIndex,
+        payload: session,
+        created_at: existing?.createdAt ?? now,
+        updated_at: now,
+      }
+
+      const { data, error } = await client
+        .from('chat_sessions')
+        .upsert(row, { onConflict: 'id' })
+        .select('id, user_id, name, type, starred, hidden, assistant_avatar_key, pic_url, order_index, payload, created_at, updated_at')
+        .single<SupabaseChatSessionRow>()
+
+      if (error) {
+        throw error
+      }
+
+      return mapChatSessionRow(data)
+    },
+    async reorderChatSessions(userId, sessionIds) {
+      await ensureSeeded()
+      const existing = await this.listChatSessions(userId)
+      const existingIds = new Set(existing.map((entry) => entry.id))
+      const orderedIds = [
+        ...sessionIds.filter((id) => existingIds.has(id)),
+        ...existing.map((entry) => entry.id).filter((id) => !sessionIds.includes(id)),
+      ]
+
+      if (!orderedIds.length) {
+        return []
+      }
+
+      const { error } = await client.from('chat_sessions').upsert(
+        orderedIds.map((sessionId, index) => ({
+          id: sessionId,
+          user_id: userId,
+          order_index: index,
+        })),
+        { onConflict: 'id' }
+      )
+
+      if (error) {
+        throw error
+      }
+
+      return await this.listChatSessions(userId)
+    },
+    async deleteChatSession(sessionId, userId) {
+      await ensureSeeded()
+      const { error, count } = await client
+        .from('chat_sessions')
+        .delete({ count: 'exact' })
+        .eq('id', sessionId)
+        .eq('user_id', userId)
+
+      if (error) {
+        throw error
+      }
+
+      return Boolean(count)
+    },
   }
 }
 
@@ -909,6 +1138,39 @@ function mapBridgeSessionRow(row: SupabaseBridgeSessionRow): BridgeSessionRecord
     userId: row.user_id,
     bridgeState: row.bridge_state,
     updatedAt: row.updated_at,
+  }
+}
+
+function mapUserProfileRow(row: SupabaseUserProfileRow): UserProfile {
+  return {
+    userId: row.user_id,
+    email: row.email ?? undefined,
+    role: row.role,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function mapChatSessionMetaRow(row: SupabaseChatSessionRow): ChatSessionMetaRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    type: row.type ?? undefined,
+    starred: row.starred ?? undefined,
+    hidden: row.hidden ?? undefined,
+    assistantAvatarKey: row.assistant_avatar_key ?? undefined,
+    picUrl: row.pic_url ?? undefined,
+    orderIndex: row.order_index,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function mapChatSessionRow(row: SupabaseChatSessionRow): ChatSessionRecord {
+  return {
+    ...mapChatSessionMetaRow(row),
+    session: row.payload,
   }
 }
 

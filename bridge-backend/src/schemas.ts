@@ -137,3 +137,25 @@ export const BridgeSessionUpsertBodySchema = z.object({
 export const OAuthStartBodySchema = z.object({
   sessionId: z.string().min(1).max(120).optional(),
 })
+
+export const ChatSessionPayloadSchema = z
+  .object({
+    id: z.string().min(1).max(120),
+    name: z.string().min(1).max(500),
+    type: z.enum(['chat', 'picture']).optional(),
+    starred: z.boolean().optional(),
+    hidden: z.boolean().optional(),
+    assistantAvatarKey: z.string().max(200).optional(),
+    picUrl: z.string().max(2000).optional(),
+    bridgeState: SessionBridgeStateSchema.optional(),
+  })
+  .passthrough()
+
+export const ChatSessionUpsertBodySchema = z.object({
+  session: ChatSessionPayloadSchema,
+  previousSessionId: z.string().min(1).max(120).optional(),
+})
+
+export const ChatSessionOrderBodySchema = z.object({
+  sessionIds: z.array(z.string().min(1).max(120)).max(500),
+})

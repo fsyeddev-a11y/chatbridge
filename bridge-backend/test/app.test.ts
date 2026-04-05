@@ -106,6 +106,67 @@ describe('bridge-backend app', () => {
     )
   })
 
+  it('persists and reloads chat sessions for the signed-in user only', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
+
+    const upsertResponse = await app.inject({
+      method: 'PUT',
+      url: '/api/chat-sessions/session-1',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        session: {
+          id: 'session-1',
+          name: 'Biology Notes',
+          type: 'chat',
+          messages: [],
+        },
+      },
+    })
+
+    assert.equal(upsertResponse.statusCode, 200)
+
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: '/api/chat-sessions',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(listResponse.statusCode, 200)
+    assert.deepEqual(listResponse.json().sessions.map((session: { id: string; name: string }) => session.id), ['session-1'])
+
+    const getResponse = await app.inject({
+      method: 'GET',
+      url: '/api/chat-sessions/session-1',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(getResponse.statusCode, 200)
+    assert.equal(getResponse.json().session.name, 'Biology Notes')
+  })
+
+  it('creates a user profile with a role when authenticated requests arrive', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().user.userId, 'user-1')
+    assert.equal(response.json().user.email, 'tester@example.com')
+    assert.equal(response.json().user.role, 'student')
+  })
+
   it('accepts structured audit events', async () => {
     const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
     const response = await app.inject({

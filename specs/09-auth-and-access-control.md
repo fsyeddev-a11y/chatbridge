@@ -11,8 +11,11 @@
   - Supabase sign-in gate for deployed web
   - no public sign-up for current internal testing
   - bearer-token verification on protected `bridge-backend` routes
+  - backend-owned user profile creation on authenticated requests
+  - initial user-role foundation with `admin`, `teacher`, `student`, and `developer`
+  - `GET /api/me` profile surface for future role-aware UI
 - Not implemented yet:
-  - explicit production role model and role-backed route enforcement
+  - role-backed route enforcement for privileged actions
   - school/org enrollment model
   - separate teacher, student, admin, and developer account experiences
 
@@ -118,6 +121,7 @@ developer
 **MVP note:**
 - Internal testing may begin with a shared authenticated account.
 - Production-grade role separation must still be modeled explicitly.
+- The current implementation bootstraps a user profile on first authenticated request and assigns a default role based on configured email allowlists or a safe fallback role. Route enforcement is a follow-on slice.
 
 **Initial authorization matrix:**
 

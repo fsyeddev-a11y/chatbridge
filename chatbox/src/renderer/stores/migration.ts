@@ -32,6 +32,7 @@ import storage, { StorageKey } from '@/storage'
 import { StorageKeyGenerator } from '@/storage/StoreStorage'
 import * as defaults from '../../shared/defaults'
 import { getLogger } from '../lib/utils'
+import { USE_CHATBRIDGE_BACKEND_SESSIONS } from '../variables'
 import { migrationProcessAtom } from './atoms/utilAtoms'
 import { getSessionMeta } from './sessionHelpers'
 
@@ -172,7 +173,9 @@ async function migrateStorage() {
     // 这是第一次运行应用，直接将ConfigVersion设置为CurrentVersion，跳过后续的数据迁移
     await storage.setItemNow(StorageKey.ConfigVersion, CurrentVersion)
     // 初始化默认会话
-    await initData()
+    if (!USE_CHATBRIDGE_BACKEND_SESSIONS) {
+      await initData()
+    }
   }
 }
 

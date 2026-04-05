@@ -4,8 +4,12 @@ import storage from '@/storage'
 import { StorageKey, StorageKeyGenerator } from '@/storage/StoreStorage'
 import * as chatStore from '@/stores/chatStore'
 import { getSessionMeta } from '@/stores/sessionHelpers'
+import { USE_CHATBRIDGE_BACKEND_SESSIONS } from '@/variables'
 
 export async function initData() {
+  if (USE_CHATBRIDGE_BACKEND_SESSIONS) {
+    return
+  }
   await initSessionsIfNeeded()
 }
 

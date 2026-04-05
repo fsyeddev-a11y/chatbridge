@@ -8,12 +8,14 @@
 ## Status
 
 - Implemented now:
-  - file-backed backend store for registry, allowlists, review actions, and audit events
-  - frontend session-owned active app runtime state
+  - Supabase/Postgres-backed control-plane persistence
+  - backend-owned bridge app/session state
+  - app-context snapshot persistence
+  - backend-owned chat session persistence for signed-in web users
 - Not implemented yet:
-  - Supabase/Postgres persistence for control-plane and app-session data
-  - backend-owned canonical app session state
-  - reload/reconnect recovery from backend truth
+  - richer normalized message storage and server-side search
+  - full role-aware session visibility and sharing rules
+  - explicit durable `closed`/`terminated` app lifecycle state
 
 ## Context
 
@@ -53,8 +55,11 @@ app_versions
 review_actions
 class_allowlists
 audit_events
-app_sessions
+chat_sessions
+user_profiles
+oauth_tokens
 app_context_snapshots
+bridge_sessions
 ```
 
 **Recommended ownership split:**
@@ -158,6 +163,7 @@ frontend opens session
 - Records can be associated with user IDs and roles.
 - Audit records can be queried by user, session, app, and class.
 - Sensitive credential material remains excluded from normal relational event payloads.
+- Signed-in users only load their own persisted conversations on login.
 
 #### Testing
 
