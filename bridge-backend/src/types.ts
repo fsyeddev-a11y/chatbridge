@@ -1,5 +1,6 @@
 export type ReviewState = 'pending' | 'approved' | 'rejected' | 'suspended'
 export type UserRole = 'admin' | 'teacher' | 'student' | 'developer'
+export type SchoolMembershipRole = 'school_admin' | 'teacher' | 'student'
 export type ClassMembershipRole = 'teacher' | 'student'
 
 export type RuntimeAuthType = 'none' | 'api-key' | 'oauth2'
@@ -57,6 +58,14 @@ export type AppVersionRecord = {
 
 export type ClassAppAllowlist = {
   classId: string
+  appId: string
+  enabledBy: string
+  enabledAt: number
+  disabledAt?: number
+}
+
+export type SchoolAppAllowlist = {
+  schoolId: string
   appId: string
   enabledBy: string
   enabledAt: number
@@ -139,8 +148,24 @@ export type UserProfile = {
   updatedAt: number
 }
 
+export type SchoolRecord = {
+  schoolId: string
+  name: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type SchoolMembershipRecord = {
+  schoolId: string
+  userId: string
+  membershipRole: SchoolMembershipRole
+  createdAt: number
+  removedAt?: number
+}
+
 export type ClassRecord = {
   classId: string
+  schoolId?: string
   name: string
   organizationId?: string
   externalRef?: string

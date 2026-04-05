@@ -18,6 +18,10 @@ export const ClassIdParamsSchema = z.object({
   classId: z.string().min(1),
 })
 
+export const SchoolIdParamsSchema = z.object({
+  schoolId: z.string().min(1),
+})
+
 export const AppManifestSchema = z.object({
   appId: z.string().min(1).max(100),
   name: z.string().min(1).max(120),
@@ -95,6 +99,15 @@ export const ClassAllowlistBodySchema = z.object({
 })
 
 export const ClassAllowlistToggleBodySchema = z.object({
+  enabledBy: z.string().min(1).max(100),
+})
+
+export const SchoolAllowlistBodySchema = z.object({
+  appId: z.string().min(1).max(100),
+  enabledBy: z.string().min(1).max(100),
+})
+
+export const SchoolAllowlistToggleBodySchema = z.object({
   enabledBy: z.string().min(1).max(100),
 })
 

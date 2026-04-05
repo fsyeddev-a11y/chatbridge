@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify'
-import type { UserRole } from './types.js'
+import type { BridgeStore } from './store.js'
+import type { SchoolMembershipRole, UserRole } from './types.js'
 
 function getConfiguredUserRoleEmails(envValue: string | undefined) {
   return new Set(
@@ -42,6 +43,25 @@ export function resolveDefaultUserRoles(email?: string): UserRole[] {
   }
 
   return normalizeRoles(roles)
+}
+
+export function resolveDefaultSchoolMembershipRoles(email?: string, roles: UserRole[] = []): SchoolMembershipRole[] {
+  const normalizedEmail = email?.trim().toLowerCase()
+  const schoolAdminEmails = getConfiguredUserRoleEmails(process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS)
+  const isSchoolAdmin = Boolean(normalizedEmail && schoolAdminEmails.has(normalizedEmail))
+
+  const membershipRoles: SchoolMembershipRole[] = []
+  if (isSchoolAdmin) {
+    membershipRoles.push('school_admin')
+  }
+  if (roles.includes('teacher')) {
+    membershipRoles.push('teacher')
+  }
+  if (roles.includes('student') && !isSchoolAdmin) {
+    membershipRoles.push('student')
+  }
+
+  return ['school_admin', 'teacher', 'student'].filter((role) => membershipRoles.includes(role as SchoolMembershipRole)) as SchoolMembershipRole[]
 }
 
 export function parseRequestUserRoles(headerValue: string | string[] | undefined): UserRole[] {
@@ -88,4 +108,117 @@ export function requireAnyRole(request: FastifyRequest, reply: FastifyReply, exp
   }
 
   return undefined
+}
+
+export async function requireSchoolAdminForSchoolOrAdmin(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  store: Pick<BridgeStore, 'listSchoolMembershipsForUser'>,
+  schoolId: string
+) {
+  const userId = getRequestUserId(request)
+  if (!userId) {
+    return reply.status(401).send({
+      error: 'unauthorized',
+    })
+  }
+
+  if (requestHasAnyRole(request, ['admin'])) {
+    return undefined
+  }
+
+  const memberships = await store.listSchoolMembershipsForUser(userId)
+  const hasAccess = memberships.some(
+    (membership) => membership.schoolId === schoolId && membership.membershipRole === 'school_admin'
+  )
+
+  if (!hasAccess) {
+    return reply.status(403).send({
+      error: 'forbidden',
+      requiredScope: 'school_admin',
+      schoolId,
+    })
+  }
+
+  return undefined
+}
+
+export async function requireTeacherForClassOrAdmin(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  store: Pick<BridgeStore, 'listClassMembershipsForUser'>,
+  classId: string
+) {
+  const userId = getRequestUserId(request)
+  if (!userId) {
+    return reply.status(401).send({
+      error: 'unauthorized',
+    })
+  }
+
+  if (requestHasAnyRole(request, ['admin'])) {
+    return undefined
+  }
+
+  const memberships = await store.listClassMembershipsForUser(userId)
+  const hasAccess = memberships.some(
+    (membership) => membership.classId === classId && membership.membershipRole === 'teacher'
+  )
+
+  if (!hasAccess) {
+    return reply.status(403).send({
+      error: 'forbidden',
+      requiredScope: 'teacher_for_class',
+      classId,
+    })
+  }
+
+  return undefined
+}
+
+export async function requireClassAccess(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  store: Pick<BridgeStore, 'getClassRecord' | 'listClassMembershipsForUser' | 'listSchoolMembershipsForUser'>,
+  classId: string
+) {
+  const userId = getRequestUserId(request)
+  if (!userId) {
+    return reply.status(401).send({
+      error: 'unauthorized',
+    })
+  }
+
+  const classRecord = await store.getClassRecord(classId)
+  if (!classRecord) {
+    return reply.status(404).send({
+      error: 'class_not_found',
+    })
+  }
+
+  if (requestHasAnyRole(request, ['admin'])) {
+    return undefined
+  }
+
+  const classMemberships = await store.listClassMembershipsForUser(userId)
+  const hasClassAccess = classMemberships.some((membership) => membership.classId === classId)
+  if (hasClassAccess) {
+    return undefined
+  }
+
+  if (classRecord.schoolId) {
+    const schoolMemberships = await store.listSchoolMembershipsForUser(userId)
+    const hasSchoolAdminAccess = schoolMemberships.some(
+      (membership) => membership.schoolId === classRecord.schoolId && membership.membershipRole === 'school_admin'
+    )
+    if (hasSchoolAdminAccess) {
+      return undefined
+    }
+  }
+
+  return reply.status(403).send({
+    error: 'forbidden',
+    requiredScope: 'class_access',
+    classId,
+  })
 }

@@ -40,6 +40,25 @@ create table if not exists review_actions (
   timestamp bigint not null
 );
 
+create table if not exists schools (
+  id text primary key,
+  name text not null,
+  created_at bigint not null,
+  updated_at bigint not null
+);
+
+create table if not exists school_allowlists (
+  id text primary key,
+  school_id text not null references schools(id) on delete cascade,
+  app_id text not null references apps(app_id) on delete cascade,
+  enabled_by text not null,
+  enabled_at bigint not null,
+  disabled_at bigint
+);
+
+create index if not exists school_allowlists_school_id_idx on school_allowlists(school_id);
+create index if not exists school_allowlists_app_id_idx on school_allowlists(app_id);
+
 create table if not exists class_allowlists (
   id text primary key,
   class_id text not null,
@@ -141,10 +160,28 @@ create table if not exists classes (
   id text primary key,
   name text not null,
   organization_id text,
+  school_id text references schools(id) on delete cascade,
   external_ref text,
   created_at bigint not null,
   updated_at bigint not null
 );
+
+alter table classes add column if not exists school_id text references schools(id) on delete cascade;
+
+create table if not exists school_memberships (
+  id text primary key,
+  school_id text not null references schools(id) on delete cascade,
+  user_id text not null references user_profiles(user_id) on delete cascade,
+  membership_role text not null check (membership_role in ('school_admin', 'teacher', 'student')),
+  created_at bigint not null,
+  removed_at bigint
+);
+
+create unique index if not exists school_memberships_school_user_role_active_idx
+  on school_memberships(school_id, user_id, membership_role)
+  where removed_at is null;
+create index if not exists school_memberships_user_id_idx on school_memberships(user_id);
+create index if not exists school_memberships_school_id_idx on school_memberships(school_id);
 
 create table if not exists class_memberships (
   id text primary key,

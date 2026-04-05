@@ -13,11 +13,19 @@ import type {
   ClassAppAllowlist,
   OAuthTokenRecord,
   ReviewAction,
+  SchoolAppAllowlist,
+  SchoolMembershipRecord,
+  SchoolRecord,
   SessionBridgeState,
   UserProfile,
 } from './types.js'
 import { getAllowedOriginsForLaunchUrl, getConfiguredWeatherAppUrl, type BridgeStore } from './store.js'
-import { normalizeRoles, resolveDefaultUserRoles, selectPrimaryUserRole } from './authorization.js'
+import {
+  normalizeRoles,
+  resolveDefaultSchoolMembershipRoles,
+  resolveDefaultUserRoles,
+  selectPrimaryUserRole,
+} from './authorization.js'
 
 type SupabaseBridgeStoreRow = {
   app_id: string
@@ -47,6 +55,15 @@ type SupabaseAppVersionRow = {
 type SupabaseAllowlistRow = {
   id: string
   class_id: string
+  app_id: string
+  enabled_by: string
+  enabled_at: number
+  disabled_at: number | null
+}
+
+type SupabaseSchoolAllowlistRow = {
+  id: string
+  school_id: string
   app_id: string
   enabled_by: string
   enabled_at: number
@@ -132,9 +149,26 @@ type SupabaseClassRow = {
   id: string
   name: string
   organization_id: string | null
+  school_id: string | null
   external_ref: string | null
   created_at: number
   updated_at: number
+}
+
+type SupabaseSchoolRow = {
+  id: string
+  name: string
+  created_at: number
+  updated_at: number
+}
+
+type SupabaseSchoolMembershipRow = {
+  id: string
+  school_id: string
+  user_id: string
+  membership_role: 'school_admin' | 'teacher' | 'student'
+  created_at: number
+  removed_at: number | null
 }
 
 type SupabaseClassMembershipRow = {
@@ -169,10 +203,13 @@ type RegistryComposition = {
 type SupabaseSeedData = {
   registryEntries: AppRegistryEntry[]
   appVersions: AppVersionRecord[]
+  schoolRecords: SchoolRecord[]
   classRecords: ClassRecord[]
+  schoolAllowlist: SchoolAppAllowlist[]
   classAllowlist: ClassAppAllowlist[]
 }
 
+const DEMO_SCHOOL_ID = 'demo-school'
 const DEMO_CLASS_ID = 'demo-class'
 
 export function getSupabasePersistenceConfig() {
@@ -240,6 +277,52 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     return normalizeRoles([...existingRoles, ...defaults])
   }
 
+  async function listActiveSchoolMembershipRows(userId: string) {
+    const { data, error } = await client
+      .from('school_memberships')
+      .select('id, school_id, user_id, membership_role, created_at, removed_at')
+      .eq('user_id', userId)
+      .is('removed_at', null)
+      .returns<SupabaseSchoolMembershipRow[]>()
+
+    if (error) {
+      throw error
+    }
+
+    return data || []
+  }
+
+  async function ensureDefaultSchoolMemberships(userId: string, email: string | undefined, roles: ReturnType<typeof normalizeRoles>) {
+    const existingMemberships = await listActiveSchoolMembershipRows(userId)
+    if (existingMemberships.length > 0) {
+      return existingMemberships.map((membership) => membership.membership_role)
+    }
+
+    const membershipRoles = resolveDefaultSchoolMembershipRoles(email, roles)
+    if (!membershipRoles.length) {
+      return []
+    }
+
+    const now = Date.now()
+    const { error } = await client.from('school_memberships').upsert(
+      membershipRoles.map((membershipRole) => ({
+        id: `${userId}:${DEMO_SCHOOL_ID}:${membershipRole}`,
+        school_id: DEMO_SCHOOL_ID,
+        user_id: userId,
+        membership_role: membershipRole,
+        created_at: now,
+        removed_at: null,
+      })),
+      { onConflict: 'id' }
+    )
+
+    if (error) {
+      throw error
+    }
+
+    return membershipRoles
+  }
+
   async function listActiveClassMembershipRows(userId: string) {
     const { data, error } = await client
       .from('class_memberships')
@@ -255,13 +338,20 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
     return data || []
   }
 
-  async function ensureDefaultClassMembership(userId: string, roles: ReturnType<typeof normalizeRoles>) {
+  async function ensureDefaultClassMembership(
+    userId: string,
+    schoolMembershipRoles: Array<'school_admin' | 'teacher' | 'student'>
+  ) {
     const existingMemberships = await listActiveClassMembershipRows(userId)
     if (existingMemberships.length > 0) {
       return
     }
 
-    const membershipRole = roles.includes('teacher') ? 'teacher' : roles.includes('student') ? 'student' : undefined
+    const membershipRole = schoolMembershipRoles.includes('teacher')
+      ? 'teacher'
+      : schoolMembershipRoles.includes('student')
+        ? 'student'
+        : undefined
     if (!membershipRole) {
       return
     }
@@ -306,7 +396,12 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
       }
 
       const roles = await ensureDefaultUserRoles(user.userId, row.email ?? existing?.email ?? undefined)
-      await ensureDefaultClassMembership(user.userId, roles)
+      const schoolMembershipRoles = await ensureDefaultSchoolMemberships(
+        user.userId,
+        row.email ?? existing?.email ?? undefined,
+        roles
+      )
+      await ensureDefaultClassMembership(user.userId, schoolMembershipRoles)
 
       return {
         userId: user.userId,
@@ -338,6 +433,34 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
       return mapUserProfileRow(data, roles)
     },
 
+    async listSchoolsForUser(userId) {
+      await ensureSeeded()
+      const membershipRows = await listActiveSchoolMembershipRows(userId)
+      const schoolIds = membershipRows.map((row) => row.school_id)
+      if (!schoolIds.length) {
+        return []
+      }
+
+      const { data, error } = await client
+        .from('schools')
+        .select('id, name, created_at, updated_at')
+        .in('id', schoolIds)
+        .order('created_at', { ascending: true })
+        .returns<SupabaseSchoolRow[]>()
+
+      if (error) {
+        throw error
+      }
+
+      return (data || []).map(mapSchoolRow)
+    },
+
+    async listSchoolMembershipsForUser(userId) {
+      await ensureSeeded()
+      const membershipRows = await listActiveSchoolMembershipRows(userId)
+      return membershipRows.map(mapSchoolMembershipRow)
+    },
+
     async listClassesForUser(userId) {
       await ensureSeeded()
       const membershipRows = await listActiveClassMembershipRows(userId)
@@ -364,6 +487,21 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
       await ensureSeeded()
       const membershipRows = await listActiveClassMembershipRows(userId)
       return membershipRows.map(mapClassMembershipRow)
+    },
+
+    async getClassRecord(classId) {
+      await ensureSeeded()
+      const { data, error } = await client
+        .from('classes')
+        .select('id, name, organization_id, school_id, external_ref, created_at, updated_at')
+        .eq('id', classId)
+        .maybeSingle<SupabaseClassRow>()
+
+      if (error) {
+        throw error
+      }
+
+      return data ? mapClassRow(data) : undefined
     },
 
     async listRegistryEntries() {
@@ -412,6 +550,22 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 
     async listApprovedAppsForClass(classId) {
       await ensureSeeded()
+      const classRecord = await this.getClassRecord(classId)
+      if (!classRecord?.schoolId) {
+        return []
+      }
+
+      const { data: schoolAllowlistRows, error: schoolAllowlistError } = await client
+        .from('school_allowlists')
+        .select('id, school_id, app_id, enabled_by, enabled_at, disabled_at')
+        .eq('school_id', classRecord.schoolId)
+        .is('disabled_at', null)
+        .returns<SupabaseSchoolAllowlistRow[]>()
+
+      if (schoolAllowlistError) {
+        throw schoolAllowlistError
+      }
+
       const { data: allowlistRows, error: allowlistError } = await client
         .from('class_allowlists')
         .select('id, class_id, app_id, enabled_by, enabled_at, disabled_at')
@@ -423,7 +577,10 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
         throw allowlistError
       }
 
-      const enabledAppIds = (allowlistRows || []).map((row) => row.app_id)
+      const schoolEnabledAppIds = new Set((schoolAllowlistRows || []).map((row) => row.app_id))
+      const enabledAppIds = (allowlistRows || [])
+        .map((row) => row.app_id)
+        .filter((appId) => schoolEnabledAppIds.has(appId))
       if (!enabledAppIds.length) {
         return []
       }
@@ -445,6 +602,22 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
         manifest: entry.activeManifest || entry.manifest,
         reviewState: 'approved',
       }))
+    },
+
+    async listSchoolAllowlist(schoolId) {
+      await ensureSeeded()
+      const { data, error } = await client
+        .from('school_allowlists')
+        .select('id, school_id, app_id, enabled_by, enabled_at, disabled_at')
+        .eq('school_id', schoolId)
+        .order('enabled_at', { ascending: true })
+        .returns<SupabaseSchoolAllowlistRow[]>()
+
+      if (error) {
+        throw error
+      }
+
+      return (data || []).map(mapSchoolAllowlistRow)
     },
 
     async listClassAllowlist(classId) {
@@ -579,10 +752,54 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
       return await this.getRegistryEntry(appId)
     },
 
-    async enableAppForClass(classId, appId, enabledBy) {
+    async enableAppForSchool(schoolId, appId, enabledBy) {
       await ensureSeeded()
       const appEntry = await this.getRegistryEntry(appId)
       if (!appEntry || !appEntry.activeManifest) {
+        return undefined
+      }
+
+      const row: SupabaseSchoolAllowlistRow = {
+        id: `${schoolId}:${appId}`,
+        school_id: schoolId,
+        app_id: appId,
+        enabled_by: enabledBy,
+        enabled_at: Date.now(),
+        disabled_at: null,
+      }
+
+      const { data, error } = await client
+        .from('school_allowlists')
+        .upsert(row, { onConflict: 'id' })
+        .select('id, school_id, app_id, enabled_by, enabled_at, disabled_at')
+        .single<SupabaseSchoolAllowlistRow>()
+
+      if (error) {
+        throw error
+      }
+
+      return mapSchoolAllowlistRow(data)
+    },
+
+    async enableAppForClass(classId, appId, enabledBy) {
+      await ensureSeeded()
+      const appEntry = await this.getRegistryEntry(appId)
+      const classRecord = await this.getClassRecord(classId)
+      if (!appEntry || !appEntry.activeManifest || !classRecord?.schoolId) {
+        return undefined
+      }
+
+      const { data: schoolAllowlistRow, error: schoolAllowlistError } = await client
+        .from('school_allowlists')
+        .select('id, school_id, app_id, enabled_by, enabled_at, disabled_at')
+        .eq('id', `${classRecord.schoolId}:${appId}`)
+        .is('disabled_at', null)
+        .maybeSingle<SupabaseSchoolAllowlistRow>()
+
+      if (schoolAllowlistError) {
+        throw schoolAllowlistError
+      }
+      if (!schoolAllowlistRow) {
         return undefined
       }
 
@@ -606,6 +823,30 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
       }
 
       return mapAllowlistRow(data)
+    },
+
+    async disableAppForSchool(schoolId, appId, _enabledBy) {
+      await ensureSeeded()
+      const existingRows = await this.listSchoolAllowlist(schoolId)
+      const existing = existingRows.find((entry) => entry.appId === appId && !entry.disabledAt)
+      if (!existing) {
+        return undefined
+      }
+
+      const { data, error } = await client
+        .from('school_allowlists')
+        .update({
+          disabled_at: Date.now(),
+        })
+        .eq('id', `${schoolId}:${appId}`)
+        .select('id, school_id, app_id, enabled_by, enabled_at, disabled_at')
+        .single<SupabaseSchoolAllowlistRow>()
+
+      if (error) {
+        throw error
+      }
+
+      return mapSchoolAllowlistRow(data)
     },
 
     async disableAppForClass(classId, appId, _enabledBy) {
@@ -965,6 +1206,23 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 async function bootstrapSeedData(client: SupabaseClient) {
   const seedData = createSupabaseSeedData()
 
+  const missingSchoolEntries = await getMissingSeedSchoolEntries(client, seedData.schoolRecords)
+  if (missingSchoolEntries.length) {
+    const { error: seedSchoolsError } = await client.from('schools').upsert(
+      missingSchoolEntries.map((entry) => ({
+        id: entry.schoolId,
+        name: entry.name,
+        created_at: entry.createdAt,
+        updated_at: entry.updatedAt,
+      })),
+      { onConflict: 'id' }
+    )
+
+    if (seedSchoolsError) {
+      throw seedSchoolsError
+    }
+  }
+
   const missingClassEntries = await getMissingSeedClassEntries(client, seedData.classRecords)
   if (missingClassEntries.length) {
     const { error: seedClassesError } = await client.from('classes').upsert(
@@ -972,6 +1230,7 @@ async function bootstrapSeedData(client: SupabaseClient) {
         id: entry.classId,
         name: entry.name,
         organization_id: entry.organizationId ?? null,
+        school_id: entry.schoolId ?? null,
         external_ref: entry.externalRef ?? null,
         created_at: entry.createdAt,
         updated_at: entry.updatedAt,
@@ -1029,6 +1288,25 @@ async function bootstrapSeedData(client: SupabaseClient) {
     }
   }
 
+  const missingSchoolAllowlistEntries = await getMissingSeedSchoolAllowlistEntries(client, seedData.schoolAllowlist)
+  if (missingSchoolAllowlistEntries.length) {
+    const { error: seedSchoolAllowlistError } = await client.from('school_allowlists').upsert(
+      missingSchoolAllowlistEntries.map((entry) => ({
+        id: `${entry.schoolId}:${entry.appId}`,
+        school_id: entry.schoolId,
+        app_id: entry.appId,
+        enabled_by: entry.enabledBy,
+        enabled_at: entry.enabledAt,
+        disabled_at: entry.disabledAt ?? null,
+      })),
+      { onConflict: 'id' }
+    )
+
+    if (seedSchoolAllowlistError) {
+      throw seedSchoolAllowlistError
+    }
+  }
+
   const missingAllowlistEntries = await getMissingSeedAllowlistEntries(client, seedData.classAllowlist)
   if (missingAllowlistEntries.length) {
     const { error: seedAllowlistError } = await client.from('class_allowlists').upsert(
@@ -1047,6 +1325,26 @@ async function bootstrapSeedData(client: SupabaseClient) {
       throw seedAllowlistError
     }
   }
+}
+
+export async function getMissingSeedSchoolEntries(client: SupabaseClient, seedEntries: SchoolRecord[]) {
+  const schoolIds = seedEntries.map((entry) => entry.schoolId)
+  if (!schoolIds.length) {
+    return []
+  }
+
+  const { data, error } = await client
+    .from('schools')
+    .select('id')
+    .in('id', schoolIds)
+    .returns<Array<Pick<SupabaseSchoolRow, 'id'>>>()
+
+  if (error) {
+    throw error
+  }
+
+  const existingIds = new Set((data || []).map((row) => row.id))
+  return seedEntries.filter((entry) => !existingIds.has(entry.schoolId))
 }
 
 export async function getMissingSeedClassEntries(client: SupabaseClient, seedEntries: ClassRecord[]) {
@@ -1127,6 +1425,26 @@ export async function getMissingSeedAllowlistEntries(client: SupabaseClient, see
 
   const existingIds = new Set((existingRows || []).map((row) => row.id))
   return seedEntries.filter((entry) => !existingIds.has(`${entry.classId}:${entry.appId}`))
+}
+
+export async function getMissingSeedSchoolAllowlistEntries(client: SupabaseClient, seedEntries: SchoolAppAllowlist[]) {
+  const seedIds = seedEntries.map((entry) => `${entry.schoolId}:${entry.appId}`)
+  if (!seedIds.length) {
+    return []
+  }
+
+  const { data: existingRows, error } = await client
+    .from('school_allowlists')
+    .select('id')
+    .in('id', seedIds)
+    .returns<Array<Pick<SupabaseSchoolAllowlistRow, 'id'>>>()
+
+  if (error) {
+    throw error
+  }
+
+  const existingIds = new Set((existingRows || []).map((row) => row.id))
+  return seedEntries.filter((entry) => !existingIds.has(`${entry.schoolId}:${entry.appId}`))
 }
 
 function createSupabaseBridgeStoreClient() {
@@ -1282,6 +1600,16 @@ function mapAllowlistRow(row: SupabaseAllowlistRow): ClassAppAllowlist {
   }
 }
 
+function mapSchoolAllowlistRow(row: SupabaseSchoolAllowlistRow): SchoolAppAllowlist {
+  return {
+    schoolId: row.school_id,
+    appId: row.app_id,
+    enabledBy: row.enabled_by,
+    enabledAt: row.enabled_at,
+    disabledAt: row.disabled_at ?? undefined,
+  }
+}
+
 function mapReviewActionRow(row: SupabaseReviewActionRow): ReviewAction {
   return {
     appId: row.app_id,
@@ -1330,9 +1658,29 @@ function mapUserProfileRow(row: SupabaseUserProfileRow, roles?: UserProfile['rol
   }
 }
 
+function mapSchoolRow(row: SupabaseSchoolRow): SchoolRecord {
+  return {
+    schoolId: row.id,
+    name: row.name,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function mapSchoolMembershipRow(row: SupabaseSchoolMembershipRow): SchoolMembershipRecord {
+  return {
+    schoolId: row.school_id,
+    userId: row.user_id,
+    membershipRole: row.membership_role,
+    createdAt: row.created_at,
+    removedAt: row.removed_at ?? undefined,
+  }
+}
+
 function mapClassRow(row: SupabaseClassRow): ClassRecord {
   return {
     classId: row.id,
+    schoolId: row.school_id ?? undefined,
     name: row.name,
     organizationId: row.organization_id ?? undefined,
     externalRef: row.external_ref ?? undefined,
@@ -1508,12 +1856,32 @@ function createSupabaseSeedData(): SupabaseSeedData {
   return {
     registryEntries,
     appVersions,
+    schoolRecords: [
+      {
+        schoolId: DEMO_SCHOOL_ID,
+        name: 'Demo School',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
     classRecords: [
       {
         classId: DEMO_CLASS_ID,
+        schoolId: DEMO_SCHOOL_ID,
         name: 'Demo Class',
         createdAt: now,
         updatedAt: now,
+      },
+    ],
+    schoolAllowlist: [
+      { schoolId: DEMO_SCHOOL_ID, appId: 'chess', enabledBy: 'school-admin-demo', enabledAt: now, disabledAt: undefined },
+      { schoolId: DEMO_SCHOOL_ID, appId: 'weather', enabledBy: 'school-admin-demo', enabledAt: now, disabledAt: undefined },
+      {
+        schoolId: DEMO_SCHOOL_ID,
+        appId: 'google-classroom',
+        enabledBy: 'school-admin-demo',
+        enabledAt: now,
+        disabledAt: undefined,
       },
     ],
     classAllowlist: [

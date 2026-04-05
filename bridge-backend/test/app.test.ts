@@ -18,6 +18,7 @@ import {
 
 describe('bridge-backend app', () => {
   const originalAdminEmails = process.env.CHATBRIDGE_ADMIN_EMAILS
+  const originalSchoolAdminEmails = process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS
   const originalTeacherEmails = process.env.CHATBRIDGE_TEACHER_EMAILS
   const originalDeveloperEmails = process.env.CHATBRIDGE_DEVELOPER_EMAILS
 
@@ -30,9 +31,11 @@ describe('bridge-backend app', () => {
   const allowAllAuth = opsAuth
   const studentAuth = createAuthVerifier('student-1', 'student@example.com')
   const teacherAuth = createAuthVerifier('teacher-1', 'teacher@example.com')
+  const schoolAdminAuth = createAuthVerifier('school-admin-1', 'schooladmin@example.com')
 
   before(() => {
     process.env.CHATBRIDGE_ADMIN_EMAILS = 'tester@example.com,admin@example.com'
+    process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS = 'schooladmin@example.com'
     process.env.CHATBRIDGE_TEACHER_EMAILS = 'tester@example.com,teacher@example.com'
     process.env.CHATBRIDGE_DEVELOPER_EMAILS = 'tester@example.com,developer@example.com'
   })
@@ -42,6 +45,12 @@ describe('bridge-backend app', () => {
       delete process.env.CHATBRIDGE_ADMIN_EMAILS
     } else {
       process.env.CHATBRIDGE_ADMIN_EMAILS = originalAdminEmails
+    }
+
+    if (originalSchoolAdminEmails === undefined) {
+      delete process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS
+    } else {
+      process.env.CHATBRIDGE_SCHOOL_ADMIN_EMAILS = originalSchoolAdminEmails
     }
 
     if (originalTeacherEmails === undefined) {
@@ -185,7 +194,7 @@ describe('bridge-backend app', () => {
     assert.equal(getResponse.json().session.name, 'Biology Notes')
   })
 
-  it('returns user roles, classes, and memberships for authenticated users', async () => {
+  it('returns user roles, schools, classes, and memberships for authenticated users', async () => {
     const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: studentAuth, chatClient: fakeChatClient })
 
     const response = await app.inject({
@@ -201,6 +210,22 @@ describe('bridge-backend app', () => {
     assert.equal(response.json().user.email, 'student@example.com')
     assert.equal(response.json().user.role, 'student')
     assert.deepEqual(response.json().user.roles, ['student'])
+    assert.deepEqual(
+      response.json().schools.map((entry: { schoolId: string }) => entry.schoolId),
+      ['demo-school']
+    )
+    assert.deepEqual(
+      response.json().schoolMemberships.map((entry: { schoolId: string; membershipRole: string }) => ({
+        schoolId: entry.schoolId,
+        membershipRole: entry.membershipRole,
+      })),
+      [
+        {
+          schoolId: 'demo-school',
+          membershipRole: 'student',
+        },
+      ]
+    )
     assert.deepEqual(
       response.json().classes.map((entry: { classId: string }) => entry.classId),
       ['demo-class']
@@ -347,6 +372,18 @@ describe('bridge-backend app', () => {
       },
     })
 
+    const schoolAllowlistResponse = await app.inject({
+      method: 'POST',
+      url: '/api/schools/demo-school/allowlist',
+      headers: {
+        authorization: 'Bearer token-student',
+      },
+      payload: {
+        appId: 'weather',
+        enabledBy: 'student-1',
+      },
+    })
+
     const developerAppsResponse = await app.inject({
       method: 'GET',
       url: '/api/developer/apps',
@@ -358,6 +395,7 @@ describe('bridge-backend app', () => {
     assert.equal(registerResponse.statusCode, 403)
     assert.equal(reviewResponse.statusCode, 403)
     assert.equal(allowlistResponse.statusCode, 403)
+    assert.equal(schoolAllowlistResponse.statusCode, 403)
     assert.equal(developerAppsResponse.statusCode, 403)
   })
 
@@ -372,6 +410,24 @@ describe('bridge-backend app', () => {
       },
       payload: {
         reviewState: 'suspended',
+      },
+    })
+
+    assert.equal(response.statusCode, 403)
+  })
+
+  it('forbids teachers from school-admin allowlist routes', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: teacherAuth, chatClient: fakeChatClient })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/schools/demo-school/allowlist',
+      headers: {
+        authorization: 'Bearer token-teacher',
+      },
+      payload: {
+        appId: 'weather',
+        enabledBy: 'teacher-1',
       },
     })
 
@@ -559,6 +615,7 @@ describe('bridge-backend app', () => {
       }
     )
     await store.updateReviewState('story-builder', 'approved', 'admin-1', 'Initial release approved.', '1.0.0')
+    await store.enableAppForSchool('demo-school', 'story-builder', 'school-admin-1')
     await store.enableAppForClass('demo-class', 'story-builder', 'teacher-1')
 
     await store.registerApp(
@@ -653,6 +710,7 @@ describe('bridge-backend app', () => {
       }
     )
     await store.updateReviewState('story-builder', 'approved', 'admin-1', 'Initial release approved.', '1.0.0')
+    await store.enableAppForSchool('demo-school', 'story-builder', 'school-admin-1')
     await store.enableAppForClass('demo-class', 'story-builder', 'teacher-1')
     await store.registerApp(
       {
@@ -915,14 +973,48 @@ describe('bridge-backend app', () => {
     assert.equal(actionsResponse.json().actions.at(-1)?.action, 'suspend')
   })
 
-  it('enables and disables apps per class through the allowlist API', async () => {
-    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
+  it('enables and disables apps per school through the school allowlist API', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: schoolAdminAuth, chatClient: fakeChatClient })
+
+    const disableResponse = await app.inject({
+      method: 'POST',
+      url: '/api/schools/demo-school/allowlist/chess/disable',
+      headers: {
+        authorization: 'Bearer token-school-admin',
+      },
+      payload: {
+        enabledBy: 'school-admin-1',
+      },
+    })
+
+    assert.equal(disableResponse.statusCode, 200)
+    assert.equal(typeof disableResponse.json().allowlistEntry.disabledAt, 'number')
 
     const enableResponse = await app.inject({
       method: 'POST',
-      url: '/api/classes/algebra-1/allowlist',
+      url: '/api/schools/demo-school/allowlist',
       headers: {
-        authorization: 'Bearer token-1',
+        authorization: 'Bearer token-school-admin',
+      },
+      payload: {
+        appId: 'chess',
+        enabledBy: 'school-admin-1',
+      },
+    })
+
+    assert.equal(enableResponse.statusCode, 201)
+    assert.equal(enableResponse.json().allowlistEntry.schoolId, 'demo-school')
+    assert.equal(enableResponse.json().allowlistEntry.appId, 'chess')
+  })
+
+  it('enables and disables apps per class through the allowlist API', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: teacherAuth, chatClient: fakeChatClient })
+
+    const enableResponse = await app.inject({
+      method: 'POST',
+      url: '/api/classes/demo-class/allowlist',
+      headers: {
+        authorization: 'Bearer token-teacher',
       },
       payload: {
         appId: 'chess',
@@ -931,14 +1023,14 @@ describe('bridge-backend app', () => {
     })
 
     assert.equal(enableResponse.statusCode, 201)
-    assert.equal(enableResponse.json().allowlistEntry.classId, 'algebra-1')
+    assert.equal(enableResponse.json().allowlistEntry.classId, 'demo-class')
     assert.equal(enableResponse.json().allowlistEntry.appId, 'chess')
 
     const disableResponse = await app.inject({
       method: 'POST',
-      url: '/api/classes/algebra-1/allowlist/chess/disable',
+      url: '/api/classes/demo-class/allowlist/chess/disable',
       headers: {
-        authorization: 'Bearer token-1',
+        authorization: 'Bearer token-teacher',
       },
       payload: {
         enabledBy: 'teacher-1',
@@ -949,12 +1041,32 @@ describe('bridge-backend app', () => {
     assert.equal(typeof disableResponse.json().allowlistEntry.disabledAt, 'number')
   })
 
+  it('requires school approval before class-enabled apps appear in class app listings', async () => {
+    const store = createInMemoryBridgeStore()
+    await store.disableAppForSchool('demo-school', 'weather', 'school-admin-1')
+    const app = createApp({ store, authVerifier: teacherAuth, chatClient: fakeChatClient })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/classes/demo-class/apps',
+      headers: {
+        authorization: 'Bearer token-teacher',
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(
+      response.json().apps.map((entry: { manifest: { appId: string } }) => entry.manifest.appId).sort(),
+      ['chess', 'google-classroom']
+    )
+  })
+
   it('rejects allowlist enables for apps that are missing or not platform-approved', async () => {
     const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
 
     const missingAppResponse = await app.inject({
       method: 'POST',
-      url: '/api/classes/algebra-1/allowlist',
+      url: '/api/classes/demo-class/allowlist',
       headers: {
         authorization: 'Bearer token-1',
       },
@@ -1000,7 +1112,7 @@ describe('bridge-backend app', () => {
 
     const pendingAppEnableResponse = await app.inject({
       method: 'POST',
-      url: '/api/classes/algebra-1/allowlist',
+      url: '/api/classes/demo-class/allowlist',
       headers: {
         authorization: 'Bearer token-1',
       },

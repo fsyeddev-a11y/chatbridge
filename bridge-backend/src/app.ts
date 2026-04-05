@@ -3,9 +3,12 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { ZodError } from 'zod'
 import { createSupabaseAuthVerifier, getBearerToken, type AuthVerifier } from './auth.js'
 import {
+  requireClassAccess,
   getRequestUserEmail,
   getRequestUserId,
   requireAnyRole,
+  requireSchoolAdminForSchoolOrAdmin,
+  requireTeacherForClassOrAdmin,
 } from './authorization.js'
 import {
   buildOAuthPopupResultHtml,
@@ -44,6 +47,9 @@ import {
   ClassIdParamsSchema,
   OAuthStartBodySchema,
   ReviewActionBodySchema,
+  SchoolAllowlistBodySchema,
+  SchoolAllowlistToggleBodySchema,
+  SchoolIdParamsSchema,
   SessionIdParamsSchema,
 } from './schemas.js'
 import { createInMemoryBridgeStore, type BridgeStore } from './store.js'
@@ -222,10 +228,20 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       email: typeof userEmail === 'string' ? userEmail : undefined,
     })
 
+    const [schools, schoolMemberships, classes, classMemberships] = await Promise.all([
+      store.listSchoolsForUser(userId),
+      store.listSchoolMembershipsForUser(userId),
+      store.listClassesForUser(userId),
+      store.listClassMembershipsForUser(userId),
+    ])
+
     return {
       user: profile,
-      classes: await store.listClassesForUser(userId),
-      memberships: await store.listClassMembershipsForUser(userId),
+      schools,
+      schoolMemberships,
+      classes,
+      memberships: classMemberships,
+      classMemberships,
     }
   })
 
@@ -568,8 +584,12 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
   })
 
-  app.get('/api/classes/:classId/apps', async (request) => {
+  app.get('/api/classes/:classId/apps', async (request, reply) => {
     const { classId } = ClassIdParamsSchema.parse(request.params)
+    const denied = await requireClassAccess(request, reply, store, classId)
+    if (denied) {
+      return denied
+    }
     return {
       classId,
       apps: await store.listApprovedAppsForClass(classId),
@@ -577,11 +597,11 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.get('/api/classes/:classId/allowlist', async (request, reply) => {
-    const denied = requireAnyRole(request, reply, ['teacher', 'admin'])
+    const { classId } = ClassIdParamsSchema.parse(request.params)
+    const denied = await requireClassAccess(request, reply, store, classId)
     if (denied) {
       return denied
     }
-    const { classId } = ClassIdParamsSchema.parse(request.params)
     return {
       classId,
       allowlist: await store.listClassAllowlist(classId),
@@ -589,7 +609,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.post('/api/classes/:classId/allowlist', async (request, reply) => {
-    const denied = requireAnyRole(request, reply, ['teacher', 'admin'])
+    const { classId } = ClassIdParamsSchema.parse(request.params)
+    const denied = await requireTeacherForClassOrAdmin(request, reply, store, classId)
     if (denied) {
       return denied
     }
@@ -604,7 +625,6 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       return limited
     }
 
-    const { classId } = ClassIdParamsSchema.parse(request.params)
     const { appId } = ClassAllowlistBodySchema.parse(request.body)
     const enabledBy = getRequestUserId(request)!
     const allowlistEntry = await store.enableAppForClass(classId, appId, enabledBy)
@@ -621,7 +641,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.post('/api/classes/:classId/allowlist/:appId/disable', async (request, reply) => {
-    const denied = requireAnyRole(request, reply, ['teacher', 'admin'])
+    const { classId } = ClassIdParamsSchema.parse(request.params)
+    const denied = await requireTeacherForClassOrAdmin(request, reply, store, classId)
     if (denied) {
       return denied
     }
@@ -636,7 +657,6 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       return limited
     }
 
-    const { classId } = ClassIdParamsSchema.parse(request.params)
     const { appId } = AppIdParamsSchema.parse(request.params)
     ClassAllowlistToggleBodySchema.parse(request.body)
     const enabledBy = getRequestUserId(request)!
@@ -649,6 +669,84 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
 
     return {
       classId,
+      allowlistEntry,
+    }
+  })
+
+  app.get('/api/schools/:schoolId/allowlist', async (request, reply) => {
+    const { schoolId } = SchoolIdParamsSchema.parse(request.params)
+    const denied = await requireSchoolAdminForSchoolOrAdmin(request, reply, store, schoolId)
+    if (denied) {
+      return denied
+    }
+
+    return {
+      schoolId,
+      allowlist: await store.listSchoolAllowlist(schoolId),
+    }
+  })
+
+  app.post('/api/schools/:schoolId/allowlist', async (request, reply) => {
+    const { schoolId } = SchoolIdParamsSchema.parse(request.params)
+    const denied = await requireSchoolAdminForSchoolOrAdmin(request, reply, store, schoolId)
+    if (denied) {
+      return denied
+    }
+    const limited = await applyMutationRateLimit({
+      request,
+      reply,
+      store,
+      rateLimiterSet: mutationRateLimiterSet,
+      scope: 'school_allowlist_enable',
+    })
+    if (limited) {
+      return limited
+    }
+
+    const { appId } = SchoolAllowlistBodySchema.parse(request.body)
+    const enabledBy = getRequestUserId(request)!
+    const allowlistEntry = await store.enableAppForSchool(schoolId, appId, enabledBy)
+    if (!allowlistEntry) {
+      return reply.status(404).send({
+        error: 'approved_app_not_found',
+      })
+    }
+
+    return reply.status(201).send({
+      schoolId,
+      allowlistEntry,
+    })
+  })
+
+  app.post('/api/schools/:schoolId/allowlist/:appId/disable', async (request, reply) => {
+    const { schoolId } = SchoolIdParamsSchema.parse(request.params)
+    const denied = await requireSchoolAdminForSchoolOrAdmin(request, reply, store, schoolId)
+    if (denied) {
+      return denied
+    }
+    const limited = await applyMutationRateLimit({
+      request,
+      reply,
+      store,
+      rateLimiterSet: mutationRateLimiterSet,
+      scope: 'school_allowlist_disable',
+    })
+    if (limited) {
+      return limited
+    }
+
+    const { appId } = AppIdParamsSchema.parse(request.params)
+    SchoolAllowlistToggleBodySchema.parse(request.body)
+    const enabledBy = getRequestUserId(request)!
+    const allowlistEntry = await store.disableAppForSchool(schoolId, appId, enabledBy)
+    if (!allowlistEntry) {
+      return reply.status(404).send({
+        error: 'allowlist_entry_not_found',
+      })
+    }
+
+    return {
+      schoolId,
       allowlistEntry,
     }
   })

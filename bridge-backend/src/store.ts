@@ -13,12 +13,20 @@ import type {
   ClassAppAllowlist,
   OAuthTokenRecord,
   ReviewAction,
+  SchoolAppAllowlist,
+  SchoolMembershipRecord,
+  SchoolRecord,
   SessionBridgeState,
   UserProfile,
   UserRoleAssignment,
 } from './types.js'
 import { createSupabaseBridgeStore } from './supabase-store.js'
-import { normalizeRoles, resolveDefaultUserRoles, selectPrimaryUserRole } from './authorization.js'
+import {
+  normalizeRoles,
+  resolveDefaultSchoolMembershipRoles,
+  resolveDefaultUserRoles,
+  selectPrimaryUserRole,
+} from './authorization.js'
 
 type Awaitable<T> = T | Promise<T>
 
@@ -28,12 +36,16 @@ export type BridgeStore = {
     email?: string
   }): Awaitable<UserProfile>
   getUserProfile(userId: string): Awaitable<UserProfile | undefined>
+  listSchoolsForUser(userId: string): Awaitable<SchoolRecord[]>
+  listSchoolMembershipsForUser(userId: string): Awaitable<SchoolMembershipRecord[]>
   listClassesForUser(userId: string): Awaitable<ClassRecord[]>
   listClassMembershipsForUser(userId: string): Awaitable<ClassMembershipRecord[]>
+  getClassRecord(classId: string): Awaitable<ClassRecord | undefined>
   listRegistryEntries(): Awaitable<AppRegistryEntry[]>
   listRegistryEntriesForOwner(userId: string): Awaitable<AppRegistryEntry[]>
   getRegistryEntry(appId: string): Awaitable<AppRegistryEntry | undefined>
   listApprovedAppsForClass(classId: string): Awaitable<AppRegistryEntry[]>
+  listSchoolAllowlist(schoolId: string): Awaitable<SchoolAppAllowlist[]>
   listClassAllowlist(classId: string): Awaitable<ClassAppAllowlist[]>
   registerApp(
     manifest: AppManifest,
@@ -49,6 +61,8 @@ export type BridgeStore = {
     reviewNotes?: string,
     version?: string
   ): Awaitable<AppRegistryEntry | undefined>
+  enableAppForSchool(schoolId: string, appId: string, enabledBy: string): Awaitable<SchoolAppAllowlist | undefined>
+  disableAppForSchool(schoolId: string, appId: string, enabledBy: string): Awaitable<SchoolAppAllowlist | undefined>
   enableAppForClass(classId: string, appId: string, enabledBy: string): Awaitable<ClassAppAllowlist | undefined>
   disableAppForClass(classId: string, appId: string, enabledBy: string): Awaitable<ClassAppAllowlist | undefined>
   appendAuditEvent(event: AuditEvent): Awaitable<AuditEvent>
@@ -77,10 +91,13 @@ export type BridgeStore = {
 export type BridgeStoreData = {
   userProfiles: UserProfile[]
   userRoleAssignments: UserRoleAssignment[]
+  schoolRecords: SchoolRecord[]
+  schoolMemberships: SchoolMembershipRecord[]
   classRecords: ClassRecord[]
   classMemberships: ClassMembershipRecord[]
   registryEntries: AppRegistryEntry[]
   appVersions: AppVersionRecord[]
+  schoolAllowlist: SchoolAppAllowlist[]
   classAllowlist: ClassAppAllowlist[]
   auditEvents: AuditEvent[]
   reviewActions: ReviewAction[]
@@ -92,6 +109,7 @@ export type BridgeStoreData = {
 export type BridgeStoreDriver = 'file' | 'supabase'
 
 const DEFAULT_WEATHER_APP_URL = 'http://localhost:4173'
+const DEMO_SCHOOL_ID = 'demo-school'
 const DEMO_CLASS_ID = 'demo-class'
 
 export function getConfiguredWeatherAppUrl(envValue = process.env.CHATBRIDGE_WEATHER_APP_URL) {
@@ -253,9 +271,19 @@ function createSeedData(): BridgeStoreData {
   return {
     userProfiles: [],
     userRoleAssignments: [],
+    schoolRecords: [
+      {
+        schoolId: DEMO_SCHOOL_ID,
+        name: 'Demo School',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    schoolMemberships: [],
     classRecords: [
       {
         classId: DEMO_CLASS_ID,
+        schoolId: DEMO_SCHOOL_ID,
         name: 'Demo Class',
         createdAt: now,
         updatedAt: now,
@@ -264,6 +292,11 @@ function createSeedData(): BridgeStoreData {
     classMemberships: [],
     registryEntries,
     appVersions,
+    schoolAllowlist: [
+      { schoolId: DEMO_SCHOOL_ID, appId: 'chess', enabledBy: 'school-admin-demo', enabledAt: now },
+      { schoolId: DEMO_SCHOOL_ID, appId: 'weather', enabledBy: 'school-admin-demo', enabledAt: now },
+      { schoolId: DEMO_SCHOOL_ID, appId: 'google-classroom', enabledBy: 'school-admin-demo', enabledAt: now },
+    ],
     classAllowlist: [
       { classId: DEMO_CLASS_ID, appId: 'chess', enabledBy: 'teacher-demo', enabledAt: now },
       { classId: DEMO_CLASS_ID, appId: 'weather', enabledBy: 'teacher-demo', enabledAt: now },
@@ -281,10 +314,13 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
   const {
     userProfiles,
     userRoleAssignments,
+    schoolRecords,
+    schoolMemberships,
     classRecords,
     classMemberships,
     registryEntries,
     appVersions,
+    schoolAllowlist,
     classAllowlist,
     auditEvents,
     reviewActions,
@@ -297,10 +333,13 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
     onWrite?.({
       userProfiles,
       userRoleAssignments,
+      schoolRecords,
+      schoolMemberships,
       classRecords,
       classMemberships,
       registryEntries,
       appVersions,
+      schoolAllowlist,
       classAllowlist,
       auditEvents,
       reviewActions,
@@ -389,6 +428,23 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
     }
   }
 
+  function ensureDemoSchoolExists() {
+    const existing = schoolRecords.find((record) => record.schoolId === DEMO_SCHOOL_ID)
+    if (existing) {
+      return existing
+    }
+
+    const now = Date.now()
+    const nextRecord: SchoolRecord = {
+      schoolId: DEMO_SCHOOL_ID,
+      name: 'Demo School',
+      createdAt: now,
+      updatedAt: now,
+    }
+    schoolRecords.push(nextRecord)
+    return nextRecord
+  }
+
   function ensureDemoClassExists() {
     const existing = classRecords.find((record) => record.classId === DEMO_CLASS_ID)
     if (existing) {
@@ -396,8 +452,10 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
     }
 
     const now = Date.now()
+    ensureDemoSchoolExists()
     const nextRecord: ClassRecord = {
       classId: DEMO_CLASS_ID,
+      schoolId: DEMO_SCHOOL_ID,
       name: 'Demo Class',
       createdAt: now,
       updatedAt: now,
@@ -406,16 +464,47 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
     return nextRecord
   }
 
+  function listActiveSchoolMembershipsForUser(userId: string) {
+    return schoolMemberships.filter((membership) => membership.userId === userId && !membership.removedAt)
+  }
+
   function listActiveClassMembershipsForUser(userId: string) {
     return classMemberships.filter((membership) => membership.userId === userId && !membership.removedAt)
   }
 
-  function ensureDefaultClassMembership(userId: string, roles: ReturnType<typeof getActiveUserRoles>) {
+  function ensureDefaultSchoolMemberships(userId: string, email: string | undefined, roles: ReturnType<typeof getActiveUserRoles>) {
+    if (listActiveSchoolMembershipsForUser(userId).length > 0) {
+      return false
+    }
+
+    const membershipRoles = resolveDefaultSchoolMembershipRoles(email, roles)
+    if (!membershipRoles.length) {
+      return false
+    }
+
+    ensureDemoSchoolExists()
+    const now = Date.now()
+    for (const membershipRole of membershipRoles) {
+      schoolMemberships.push({
+        schoolId: DEMO_SCHOOL_ID,
+        userId,
+        membershipRole,
+        createdAt: now,
+      })
+    }
+    return true
+  }
+
+  function ensureDefaultClassMembership(userId: string, schoolMembershipRoles: Array<'school_admin' | 'teacher' | 'student'>) {
     if (listActiveClassMembershipsForUser(userId).length > 0) {
       return false
     }
 
-    const membershipRole = roles.includes('teacher') ? 'teacher' : roles.includes('student') ? 'student' : undefined
+    const membershipRole = schoolMembershipRoles.includes('teacher')
+      ? 'teacher'
+      : schoolMembershipRoles.includes('student')
+        ? 'student'
+        : undefined
     if (!membershipRole) {
       return false
     }
@@ -501,7 +590,12 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
           existing.roles = roles
           changed = true
         }
-        if (ensureDefaultClassMembership(user.userId, roles)) {
+        const schoolMembershipChanged = ensureDefaultSchoolMemberships(user.userId, user.email ?? existing.email, roles)
+        if (schoolMembershipChanged) {
+          changed = true
+        }
+        const schoolMembershipRoles = listActiveSchoolMembershipsForUser(user.userId).map((membership) => membership.membershipRole)
+        if (ensureDefaultClassMembership(user.userId, schoolMembershipRoles)) {
           changed = true
         }
         if (changed) {
@@ -512,8 +606,13 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
       }
 
       const { roles } = ensureDefaultRoleAssignments(user.userId, user.email)
+      ensureDemoSchoolExists()
+      ensureDefaultSchoolMemberships(user.userId, user.email, roles)
       ensureDemoClassExists()
-      ensureDefaultClassMembership(user.userId, roles)
+      ensureDefaultClassMembership(
+        user.userId,
+        listActiveSchoolMembershipsForUser(user.userId).map((membership) => membership.membershipRole)
+      )
       const nextProfile: UserProfile = {
         userId: user.userId,
         email: user.email,
@@ -529,12 +628,22 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
     getUserProfile(userId) {
       return getUserProfileInternal(userId)
     },
+    listSchoolsForUser(userId) {
+      const schoolIds = new Set(listActiveSchoolMembershipsForUser(userId).map((membership) => membership.schoolId))
+      return schoolRecords.filter((record) => schoolIds.has(record.schoolId))
+    },
+    listSchoolMembershipsForUser(userId) {
+      return listActiveSchoolMembershipsForUser(userId)
+    },
     listClassesForUser(userId) {
       const classIds = new Set(listActiveClassMembershipsForUser(userId).map((membership) => membership.classId))
       return classRecords.filter((record) => classIds.has(record.classId))
     },
     listClassMembershipsForUser(userId) {
       return listActiveClassMembershipsForUser(userId)
+    },
+    getClassRecord(classId) {
+      return classRecords.find((record) => record.classId === classId)
     },
     listRegistryEntries() {
       return registryEntries
@@ -546,16 +655,34 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
       return registryEntries.find((entry) => entry.manifest.appId === appId)
     },
     listApprovedAppsForClass(classId) {
+      const classRecord = classRecords.find((record) => record.classId === classId)
+      if (!classRecord?.schoolId) {
+        return []
+      }
+
+      const schoolEnabledAppIds = new Set(
+        schoolAllowlist
+          .filter((entry) => entry.schoolId === classRecord.schoolId && !entry.disabledAt)
+          .map((entry) => entry.appId)
+      )
       const enabledAppIds = new Set(
         classAllowlist.filter((entry) => entry.classId === classId && !entry.disabledAt).map((entry) => entry.appId)
       )
       return registryEntries
-        .filter((entry) => entry.activeManifest && enabledAppIds.has(entry.manifest.appId))
+        .filter(
+          (entry) =>
+            entry.activeManifest &&
+            schoolEnabledAppIds.has(entry.manifest.appId) &&
+            enabledAppIds.has(entry.manifest.appId)
+        )
         .map((entry) => ({
           ...entry,
           manifest: entry.activeManifest || entry.manifest,
           reviewState: 'approved',
         }))
+    },
+    listSchoolAllowlist(schoolId) {
+      return schoolAllowlist.filter((entry) => entry.schoolId === schoolId)
     },
     listClassAllowlist(classId) {
       return classAllowlist.filter((entry) => entry.classId === classId)
@@ -643,9 +770,53 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
       persist()
       return rebuilt
     },
-    enableAppForClass(classId, appId, enabledBy) {
+    enableAppForSchool(schoolId, appId, enabledBy) {
       const existingRegistryEntry = registryEntries.find((entry) => entry.manifest.appId === appId)
       if (!existingRegistryEntry?.activeManifest) {
+        return undefined
+      }
+
+      const now = Date.now()
+      const existing = schoolAllowlist.find((entry) => entry.schoolId === schoolId && entry.appId === appId)
+      if (existing) {
+        existing.disabledAt = undefined
+        existing.enabledAt = now
+        existing.enabledBy = enabledBy
+        persist()
+        return existing
+      }
+
+      const allowlistEntry: SchoolAppAllowlist = {
+        schoolId,
+        appId,
+        enabledBy,
+        enabledAt: now,
+      }
+      schoolAllowlist.push(allowlistEntry)
+      persist()
+      return allowlistEntry
+    },
+    disableAppForSchool(schoolId, appId, _enabledBy) {
+      const existing = schoolAllowlist.find((entry) => entry.schoolId === schoolId && entry.appId === appId && !entry.disabledAt)
+      if (!existing) {
+        return undefined
+      }
+
+      existing.disabledAt = Date.now()
+      persist()
+      return existing
+    },
+    enableAppForClass(classId, appId, enabledBy) {
+      const existingRegistryEntry = registryEntries.find((entry) => entry.manifest.appId === appId)
+      const classRecord = classRecords.find((record) => record.classId === classId)
+      if (!existingRegistryEntry?.activeManifest || !classRecord?.schoolId) {
+        return undefined
+      }
+
+      const schoolEnabled = schoolAllowlist.find(
+        (entry) => entry.schoolId === classRecord.schoolId && entry.appId === appId && !entry.disabledAt
+      )
+      if (!schoolEnabled) {
         return undefined
       }
 
@@ -855,10 +1026,13 @@ function readStoreFile(filePath: string): BridgeStoreData {
   return migrateStoreData({
     userProfiles: parsed.userProfiles || [],
     userRoleAssignments: parsed.userRoleAssignments || [],
+    schoolRecords: parsed.schoolRecords || [],
+    schoolMemberships: parsed.schoolMemberships || [],
     classRecords: parsed.classRecords || [],
     classMemberships: parsed.classMemberships || [],
     registryEntries: parsed.registryEntries || [],
     appVersions: parsed.appVersions || [],
+    schoolAllowlist: parsed.schoolAllowlist || [],
     classAllowlist: parsed.classAllowlist || [],
     auditEvents: parsed.auditEvents || [],
     reviewActions: parsed.reviewActions || [],
@@ -960,12 +1134,28 @@ function migrateStoreData(data: BridgeStoreData): BridgeStoreData {
               assignedAt: profile.createdAt,
             }))
           ),
+    schoolRecords:
+      data.schoolRecords?.length
+        ? data.schoolRecords
+        : [
+            {
+              schoolId: DEMO_SCHOOL_ID,
+              name: 'Demo School',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+          ],
+    schoolMemberships: data.schoolMemberships || [],
     classRecords:
       data.classRecords?.length
-        ? data.classRecords
+        ? data.classRecords.map((record) => ({
+            ...record,
+            schoolId: record.schoolId || DEMO_SCHOOL_ID,
+          }))
         : [
             {
               classId: DEMO_CLASS_ID,
+              schoolId: DEMO_SCHOOL_ID,
               name: 'Demo Class',
               createdAt: Date.now(),
               updatedAt: Date.now(),
@@ -974,6 +1164,19 @@ function migrateStoreData(data: BridgeStoreData): BridgeStoreData {
     classMemberships: data.classMemberships || [],
     registryEntries: migratedRegistryEntries,
     appVersions: migratedVersions,
+    schoolAllowlist:
+      data.schoolAllowlist?.length
+        ? data.schoolAllowlist
+        : [
+            { schoolId: DEMO_SCHOOL_ID, appId: 'chess', enabledBy: 'school-admin-demo', enabledAt: Date.now() },
+            { schoolId: DEMO_SCHOOL_ID, appId: 'weather', enabledBy: 'school-admin-demo', enabledAt: Date.now() },
+            {
+              schoolId: DEMO_SCHOOL_ID,
+              appId: 'google-classroom',
+              enabledBy: 'school-admin-demo',
+              enabledAt: Date.now(),
+            },
+          ],
     chatSessions: data.chatSessions || [],
   }
 }

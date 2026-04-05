@@ -38,9 +38,9 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [x] `17` Multi-role backend authorization and route enforcement
 - [ ] `17` Class membership and role-aware app/session access
 - [ ] `17` Role-aware frontend navigation and surfaces
-- [ ] `18` School hierarchy schema and scoped memberships
-- [ ] `18` School-level app approval
-- [ ] `18` Class-level activation constrained by school approval
+- [x] `18` School hierarchy schema and scoped memberships
+- [x] `18` School-level app approval
+- [x] `18` Class-level activation constrained by school approval
 - [ ] `18` Student shelf and tool exposure derived from school + class scope
 - [x] `12` Dedicated teacher/admin surfaces
 - [x] `03` OAuth connect/status/revoke foundation

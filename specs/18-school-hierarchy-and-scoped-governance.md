@@ -8,15 +8,16 @@
 ## Status
 
 - Implemented now:
-  - a single demo class flow
+  - a seeded demo school and demo class flow
+  - classes carrying `schoolId`
+  - school memberships and class memberships in backend persistence
+  - school-level app approval routes
+  - class-level activation enforced to require school approval first
   - platform approval state
-  - class-level allowlist mechanics
 - Not implemented yet:
-  - real `schools`
-  - `school_admin` school-scoped governance
-  - school-level app approval
-  - teacher class activation constrained by school approval
   - student app exposure derived from school and class membership
+  - runtime validation that backend chat/session access only uses classes the user is entitled to
+  - role-aware frontend school-admin and teacher experiences
 
 ## Context
 

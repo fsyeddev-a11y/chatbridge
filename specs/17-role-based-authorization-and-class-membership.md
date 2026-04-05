@@ -11,13 +11,14 @@
   - authenticated user bootstrap through Supabase
   - backend-owned `user_profiles`
   - durable multi-role bootstrap through `user_roles`
-  - durable class and class membership bootstrap through `classes` and `class_memberships`
+  - durable school, class, and membership bootstrap through `schools`, `school_memberships`, `classes`, and `class_memberships`
   - user-owned chat session persistence
   - developer-owned app submission and review visibility
   - centralized backend role checks for privileged routes
+  - school-admin route enforcement for school allowlists
+  - teacher-for-class route enforcement for class allowlists
 - Not implemented yet:
-  - school-scoped membership and school-admin authorization
-  - class-specific teacher ownership enforcement
+  - runtime class membership validation for backend chat/session access
   - runtime class membership validation for app/session access
   - role-aware frontend navigation and feature visibility
   - admin tooling for role assignment and school/class membership management
