@@ -102,7 +102,9 @@ export async function createChatBridgeToolDefinitions(input: {
     return []
   }
 
-  return input.approvedApps.flatMap((app) =>
+  return input.approvedApps
+    .filter((app) => Boolean(app.manifest.launchUrl))
+    .flatMap((app) =>
     app.manifest.tools.map((tool) => ({
       name: tool.name,
       description: `${tool.description} Launches or resumes the "${app.manifest.name}" ChatBridge app inside TutorMeAI.`,

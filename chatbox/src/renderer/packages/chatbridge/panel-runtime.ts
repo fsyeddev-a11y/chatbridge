@@ -99,10 +99,10 @@ export function resolveHostPostMessageTargetOrigin(app: ChatBridgeAppDefinition)
   return app.allowedOrigins[0]
 }
 
-export function getIframeSandboxPolicy(app: ChatBridgeAppDefinition, srcDoc?: string) {
+export function getIframeSandboxPolicy(app: ChatBridgeAppDefinition) {
   const basePolicy = ['allow-scripts', 'allow-forms', 'allow-popups']
 
-  if (!srcDoc && app.launchUrl) {
+  if (app.launchUrl) {
     return [...basePolicy, 'allow-same-origin'].join(' ')
   }
 

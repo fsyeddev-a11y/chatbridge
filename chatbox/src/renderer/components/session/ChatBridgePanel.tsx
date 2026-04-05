@@ -13,7 +13,7 @@ import {
   resolveBridgeEnvelope,
   shouldSendHeartbeatPing,
 } from '@/packages/chatbridge/panel-runtime'
-import { getChatBridgeMockSrcDoc, useChatBridgeApps } from '@/packages/chatbridge/registry'
+import { useChatBridgeApps } from '@/packages/chatbridge/registry'
 import { activateBridgeApp, closeBridgeApp, getSessionBridgeState, updateBridgeAppContext } from '@/packages/chatbridge/session'
 
 type ChatBridgePanelProps = {
@@ -193,8 +193,7 @@ export default function ChatBridgePanel({ session }: ChatBridgePanelProps) {
     return null
   }
 
-  const srcDoc = getChatBridgeMockSrcDoc(activeApp)
-  const iframeSandbox = getIframeSandboxPolicy(activeApp, srcDoc)
+  const iframeSandbox = getIframeSandboxPolicy(activeApp)
 
   const sendInitMessage = () => {
     if (!activeApp) {
@@ -374,7 +373,18 @@ export default function ChatBridgePanel({ session }: ChatBridgePanelProps) {
           </Alert>
         ) : null}
 
-        {activeContext?.status === 'error' ? null : (
+        {!activeApp.launchUrl ? (
+          <Alert radius="md" icon={<IconAlertCircle size={16} />} color="yellow" variant="light">
+            <Stack gap={8}>
+              <Text size="sm">{activeApp.name} does not have a deployed app URL yet, so it cannot be opened in-session.</Text>
+              <Group gap={8}>
+                <Button size="xs" variant="subtle" color="gray" onClick={() => void closeBridgeApp(session.id)}>
+                  Close App
+                </Button>
+              </Group>
+            </Stack>
+          </Alert>
+        ) : activeContext?.status === 'error' ? null : (
           <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white">
             <iframe
               ref={iframeRef}
@@ -382,8 +392,7 @@ export default function ChatBridgePanel({ session }: ChatBridgePanelProps) {
               key={activeApp.appId}
               className="h-[280px] w-full bg-white"
               sandbox={iframeSandbox}
-              src={srcDoc ? undefined : activeApp.launchUrl}
-              srcDoc={srcDoc}
+              src={activeApp.launchUrl}
               onLoad={sendInitMessage}
             />
           </div>

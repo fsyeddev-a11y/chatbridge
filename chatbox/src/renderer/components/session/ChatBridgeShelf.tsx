@@ -19,6 +19,7 @@ type ChatBridgeShelfCardProps = {
 function ChatBridgeShelfCard({ app, session, isActive }: ChatBridgeShelfCardProps) {
   const { data: oauthStatus } = useChatBridgeOAuthStatus(app.appId, app.authType === 'oauth2')
   const isConnected = oauthStatus?.connected
+  const isRunnable = Boolean(app.launchUrl)
 
   return (
     <Card withBorder radius="md" p="xs">
@@ -49,6 +50,11 @@ function ChatBridgeShelfCard({ app, session, isActive }: ChatBridgeShelfCardProp
               {app.authType === 'none' ? 'No Auth' : 'API Key'}
             </Badge>
           )}
+          {!isRunnable ? (
+            <Badge size="xs" variant="outline" color="yellow">
+              Not Deployed
+            </Badge>
+          ) : null}
         </Group>
 
         <Group grow>
@@ -76,9 +82,10 @@ function ChatBridgeShelfCard({ app, session, isActive }: ChatBridgeShelfCardProp
             <Button
               size="compact-sm"
               variant={isActive ? 'light' : 'filled'}
+              disabled={!isRunnable}
               onClick={() => void activateBridgeApp(session.id, app.appId)}
             >
-              {isActive ? 'Resume App' : 'Open App'}
+              {isRunnable ? (isActive ? 'Resume App' : 'Open App') : 'Unavailable'}
             </Button>
           )}
 
