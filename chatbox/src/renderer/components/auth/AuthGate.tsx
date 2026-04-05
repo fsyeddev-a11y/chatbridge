@@ -1,58 +1,16 @@
-import { useEffect, useState } from 'react'
-import { supabase } from '@/packages/supabase'
+import { useState } from 'react'
+import { supabase, useSupabaseAuthState } from '@/packages/supabase'
 
 type AuthGateProps = {
   children: React.ReactNode
 }
 
 export default function AuthGate({ children }: AuthGateProps) {
-  const [loading, setLoading] = useState(true)
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const { loading, isAuthenticated } = useSupabaseAuthState()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-
-  useEffect(() => {
-    if (!supabase) {
-      setLoading(false)
-      setError('Supabase is not configured for this deployment.')
-      return
-    }
-
-    let active = true
-
-    const initialize = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
-
-      if (!active) {
-        return
-      }
-
-      setIsAuthenticated(Boolean(session))
-      setLoading(false)
-    }
-
-    void initialize()
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!active) {
-        return
-      }
-
-      setIsAuthenticated(Boolean(session))
-      setLoading(false)
-    })
-
-    return () => {
-      active = false
-      subscription.unsubscribe()
-    }
-  }, [])
 
   const handleLogin = async () => {
     if (!supabase) {
@@ -86,6 +44,8 @@ export default function AuthGate({ children }: AuthGateProps) {
     return <>{children}</>
   }
 
+  const resolvedError = !supabase ? 'Supabase is not configured for this deployment.' : error
+
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-[420px] rounded-2xl border border-white/10 bg-[#1f1f23] p-8 shadow-xl">
@@ -97,7 +57,7 @@ export default function AuthGate({ children }: AuthGateProps) {
             </p>
           </div>
 
-          {error ? <div className="rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</div> : null}
+          {resolvedError ? <div className="rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-200">{resolvedError}</div> : null}
 
           <label className="block">
             <span className="mb-2 block text-sm font-medium text-gray-200">Email</span>

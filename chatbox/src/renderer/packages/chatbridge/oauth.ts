@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { getSupabaseAuthHeaders } from '@/packages/supabase'
+import { getSupabaseAuthHeaders, useSupabaseAuthState } from '@/packages/supabase'
 import queryClient from '@/stores/queryClient'
 
 const CHATBRIDGE_API_ORIGIN = process.env.CHATBRIDGE_API_ORIGIN || 'http://localhost:8787'
@@ -47,11 +47,13 @@ export async function fetchChatBridgeOAuthStatus(appId: string): Promise<OAuthSt
 }
 
 export function useChatBridgeOAuthStatus(appId: string | undefined, enabled = true) {
+  const { loading, isAuthenticated } = useSupabaseAuthState()
+
   return useQuery({
     queryKey: ChatBridgeOAuthQueryKeys.status(appId || 'unknown'),
     queryFn: () => fetchChatBridgeOAuthStatus(appId || ''),
     staleTime: 15_000,
-    enabled: Boolean(appId) && enabled,
+    enabled: Boolean(appId) && enabled && !loading && isAuthenticated,
   })
 }
 

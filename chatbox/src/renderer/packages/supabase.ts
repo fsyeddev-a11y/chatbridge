@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { useEffect, useState } from 'react'
 
 const supabaseUrl = process.env.SUPABASE_URL
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY
@@ -34,4 +35,55 @@ export async function getSupabaseAuthHeaders() {
         Authorization: `Bearer ${token}`,
       }
     : {}
+}
+
+export function useSupabaseAuthState() {
+  const [loading, setLoading] = useState(true)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+
+  useEffect(() => {
+    if (!supabase) {
+      setLoading(false)
+      setIsAuthenticated(false)
+      return
+    }
+
+    let active = true
+
+    const initialize = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      if (!active) {
+        return
+      }
+
+      setIsAuthenticated(Boolean(session))
+      setLoading(false)
+    }
+
+    void initialize()
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) {
+        return
+      }
+
+      setIsAuthenticated(Boolean(session))
+      setLoading(false)
+    })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  return {
+    loading,
+    isAuthenticated,
+  }
 }
