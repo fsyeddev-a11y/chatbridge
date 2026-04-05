@@ -153,7 +153,8 @@ export async function generate(
     status: [],
     firstTokenLatency: undefined,
     // Set isStreamingMode once during Message initialization (constant property)
-    isStreamingMode: settings.stream !== false,
+    isStreamingMode:
+      USE_CHATBRIDGE_BACKEND_CHAT && (session.type === 'chat' || session.type === undefined) ? false : settings.stream !== false,
   }
 
   await modifyMessage(sessionId, targetMsg)
@@ -223,70 +224,22 @@ export async function generate(
 
         if (USE_CHATBRIDGE_BACKEND_CHAT) {
           const bridgeState = getSessionBridgeState(session)
+          const abortController = new AbortController()
           targetMsg = {
             ...targetMsg,
             aiProvider: 'chatbridge-backend',
             model: process.env.CHATBRIDGE_DEFAULT_MODEL || 'gpt-4o-mini',
             status: [],
+            cancel: () => abortController.abort(),
           }
           await modifyMessage(sessionId, targetMsg, false, true)
           const backendRequestOptions = {
             sessionId,
             classId: bridgeState.activeClassId,
+            signal: abortController.signal,
           }
 
-          let backendResult
-          if (settings.stream !== false) {
-            const abortController = new AbortController()
-            targetMsg = {
-              ...targetMsg,
-              cancel: () => abortController.abort(),
-              contentParts: [{ type: 'text', text: '' }],
-            }
-            await modifyMessage(sessionId, targetMsg, false, true)
-
-            backendResult = await streamBackendChat(
-              promptMsgs,
-              {
-                onStarted: ({ model }) => {
-                  targetMsg = {
-                    ...targetMsg,
-                    model,
-                    status: [],
-                  }
-                  void modifyMessage(sessionId, targetMsg, false, true)
-                },
-                onDelta: (delta) => {
-                  const currentText = getMessageText(targetMsg, true, true)
-                  const nextText = `${currentText}${delta}`
-                  if (!firstTokenLatency && nextText.length > 0) {
-                    firstTokenLatency = Date.now() - startTime
-                  }
-                  targetMsg = {
-                    ...targetMsg,
-                    contentParts: [{ type: 'text', text: nextText }],
-                    firstTokenLatency,
-                    status: [],
-                  }
-                  void modifyMessage(sessionId, targetMsg, false, true)
-                },
-                onCompleted: ({ bridgeState: completedBridgeState }) => {
-                  if (completedBridgeState) {
-                    void chatStore.updateSessionWithMessages(sessionId, (currentSession) => ({
-                      ...currentSession,
-                      bridgeState: completedBridgeState,
-                    }))
-                  }
-                },
-              },
-              {
-                ...backendRequestOptions,
-                signal: abortController.signal,
-              }
-            )
-          } else {
-            backendResult = await generateBackendChat(promptMsgs, backendRequestOptions)
-          }
+          const backendResult = await generateBackendChat(promptMsgs, backendRequestOptions)
 
           if (backendResult.bridgeState) {
             await chatStore.updateSessionWithMessages(sessionId, (currentSession) => ({

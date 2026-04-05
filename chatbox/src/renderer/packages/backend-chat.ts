@@ -90,6 +90,7 @@ export async function generateBackendChat(
   options?: {
     sessionId?: string
     classId?: string
+    signal?: AbortSignal
   }
 ): Promise<BackendChatResult> {
   const response = await getBackendChatResponse('/api/chat/generate', messages, options)
