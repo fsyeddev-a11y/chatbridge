@@ -3,10 +3,14 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { ZodError } from 'zod'
 import { createSupabaseAuthVerifier, getBearerToken, type AuthVerifier } from './auth.js'
 import {
+  getRequestUserRoles,
+  requireAnyGovernanceWorkspaceAccess,
   requireClassAccess,
   getRequestUserEmail,
   getRequestUserId,
   requireAnyRole,
+  requireSchoolGovernanceReadAccess,
+  resolveEntitledClassId,
   requireSchoolAdminForSchoolOrAdmin,
   requireTeacherForClassOrAdmin,
 } from './authorization.js'
@@ -53,6 +57,7 @@ import {
   SessionIdParamsSchema,
 } from './schemas.js'
 import { createInMemoryBridgeStore, type BridgeStore } from './store.js'
+import type { RuntimeClassContext } from './types.js'
 
 export type AppOptions = {
   store?: BridgeStore
@@ -100,13 +105,151 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   const toolRateLimiterSet = options.toolRateLimiterSet ?? createConfiguredToolRateLimiterSet()
   const oauthService = options.oauthService ?? createConfiguredOAuthService()
 
-  async function prepareChatInvocation(body: {
-    sessionId?: string
-    classId?: string
-    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
-  }, userId?: string) {
-    const bridgeState = body.sessionId && userId ? await store.getBridgeSessionState(body.sessionId, userId) : undefined
-    const effectiveClassId = body.classId || bridgeState?.activeClassId
+  async function sanitizeBridgeStateForUser(
+    request: FastifyRequest,
+    userId: string,
+    sessionId: string,
+    bridgeState: Awaited<ReturnType<BridgeStore['getBridgeSessionState']>>
+  ) {
+    if (!bridgeState?.activeClassId) {
+      return bridgeState
+    }
+
+    const classResolution = await resolveEntitledClassId(store, {
+      userId,
+      roles: getRequestUserRoles(request),
+      requestedClassId: bridgeState.activeClassId,
+    })
+
+    if (!('denied' in classResolution)) {
+      return bridgeState
+    }
+
+    const sanitizedState = {
+      ...bridgeState,
+      activeClassId: undefined,
+      activeAppId: undefined,
+      appContext: bridgeState.appContext || {},
+    }
+
+    const record = await store.upsertBridgeSessionState(sessionId, userId, sanitizedState)
+    return record.bridgeState
+  }
+
+  function sortRuntimeCandidateClassIds(classIds: string[]) {
+    return [...new Set(classIds)].sort((left, right) => left.localeCompare(right))
+  }
+
+  async function buildRuntimeClassContext(
+    request: FastifyRequest,
+    userId: string,
+    bridgeState: Awaited<ReturnType<BridgeStore['getBridgeSessionState']>>
+  ): Promise<RuntimeClassContext> {
+    const persistedClassId = bridgeState?.activeClassId
+    const candidateClassIds = sortRuntimeCandidateClassIds((await store.listClassesForUser(userId)).map((entry) => entry.classId))
+
+    if (persistedClassId) {
+      const classResolution = await resolveEntitledClassId(store, {
+        userId,
+        roles: getRequestUserRoles(request),
+        requestedClassId: persistedClassId,
+      })
+
+      if (!('denied' in classResolution)) {
+        return {
+          persistedClassId,
+          validatedClassId: persistedClassId,
+          bootstrapCandidateClassIds: candidateClassIds,
+          recommendedClassId: persistedClassId,
+          reason: 'persisted_valid',
+        }
+      }
+
+      return {
+        persistedClassId,
+        bootstrapCandidateClassIds: candidateClassIds,
+        recommendedClassId: candidateClassIds[0],
+        reason: candidateClassIds.length > 0 ? 'persisted_invalid' : 'none_available',
+      }
+    }
+
+    return {
+      bootstrapCandidateClassIds: candidateClassIds,
+      recommendedClassId: candidateClassIds[0],
+      reason: candidateClassIds.length > 0 ? 'missing' : 'none_available',
+    }
+  }
+
+  function stripBridgeStateFromSessionPayload(session: Record<string, unknown>) {
+    const { bridgeState: _bridgeState, ...rest } = session
+    return rest
+  }
+
+  function mergeCanonicalBridgeStateIntoSession(
+    session: Record<string, unknown>,
+    bridgeState: Awaited<ReturnType<BridgeStore['getBridgeSessionState']>>
+  ) {
+    if (!bridgeState) {
+      const { bridgeState: _staleBridgeState, ...rest } = session
+      return rest
+    }
+
+    return {
+      ...session,
+      bridgeState,
+    }
+  }
+
+  async function prepareChatInvocation(
+    request: FastifyRequest,
+    body: {
+      sessionId?: string
+      classId?: string
+      messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
+    },
+    userId: string
+  ): Promise<
+    | {
+        ok: false
+        denied: {
+          statusCode: 403 | 404
+          body:
+            | {
+                error: 'forbidden'
+                requiredScope: 'class_access'
+                classId: string
+              }
+            | {
+                error: 'class_not_found'
+                classId: string
+              }
+        }
+      }
+    | {
+        ok: true
+        bridgeState: Awaited<ReturnType<BridgeStore['getBridgeSessionState']>>
+        effectiveClassId?: string
+        approvedApps: Awaited<ReturnType<BridgeStore['listApprovedAppsForClass']>>
+        traceId: string
+        orchestratedMessages: ReturnType<typeof prependChatBridgeOrchestrationMessage>
+        toolDefinitions: Awaited<ReturnType<typeof createChatBridgeToolDefinitions>>
+      }
+  > {
+    const bridgeState = body.sessionId ? await store.getBridgeSessionState(body.sessionId, userId) : undefined
+    const classResolution = await resolveEntitledClassId(store, {
+      userId,
+      roles: getRequestUserRoles(request),
+      requestedClassId: body.classId,
+      fallbackClassId: bridgeState?.activeClassId,
+    })
+    if ('denied' in classResolution) {
+      return {
+        ok: false,
+        denied: classResolution,
+      }
+    }
+
+    const effectiveClassId = classResolution.classId
     const approvedApps = effectiveClassId ? await store.listApprovedAppsForClass(effectiveClassId) : []
     const traceId = `model-${randomUUID()}`
     const orchestratedMessages = prependChatBridgeOrchestrationMessage(body.messages, {
@@ -126,6 +269,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     })
 
     return {
+      ok: true,
       bridgeState,
       effectiveClassId,
       approvedApps,
@@ -268,8 +412,10 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       return reply.status(404).send({ error: 'session_not_found' })
     }
 
+    const bridgeState = await sanitizeBridgeStateForUser(request, userId, sessionId, await store.getBridgeSessionState(sessionId, userId))
+
     return {
-      session: session.session,
+      session: mergeCanonicalBridgeStateIntoSession(session.session, bridgeState),
       meta: {
         id: session.id,
         name: session.name,
@@ -296,13 +442,14 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       return reply.status(400).send({ error: 'session_id_mismatch' })
     }
 
-    const record = await store.upsertChatSession(session, {
+    const record = await store.upsertChatSession(stripBridgeStateFromSessionPayload(session), {
       userId,
       email: typeof userEmail === 'string' ? userEmail : undefined,
     }, previousSessionId)
+    const bridgeState = await sanitizeBridgeStateForUser(request, userId, sessionId, await store.getBridgeSessionState(sessionId, userId))
 
     return reply.status(200).send({
-      session: record.session,
+      session: mergeCanonicalBridgeStateIntoSession(record.session, bridgeState),
       meta: {
         id: record.id,
         name: record.name,
@@ -344,7 +491,12 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     return reply.status(204).send()
   })
 
-  app.get('/api/registry/apps', async () => {
+  app.get('/api/registry/apps', async (request, reply) => {
+    const denied = await requireAnyGovernanceWorkspaceAccess(request, reply, store)
+    if (denied) {
+      return denied
+    }
+
     return {
       apps: await store.listRegistryEntries(),
     }
@@ -375,6 +527,11 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   })
 
   app.get('/api/registry/apps/:appId', async (request, reply) => {
+    const denied = await requireAnyGovernanceWorkspaceAccess(request, reply, store)
+    if (denied) {
+      return denied
+    }
+
     const { appId } = AppIdParamsSchema.parse(request.params)
     const appEntry = await store.getRegistryEntry(appId)
     if (!appEntry) {
@@ -598,7 +755,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
 
   app.get('/api/classes/:classId/allowlist', async (request, reply) => {
     const { classId } = ClassIdParamsSchema.parse(request.params)
-    const denied = await requireClassAccess(request, reply, store, classId)
+    const denied = await requireTeacherForClassOrAdmin(request, reply, store, classId)
     if (denied) {
       return denied
     }
@@ -675,7 +832,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
 
   app.get('/api/schools/:schoolId/allowlist', async (request, reply) => {
     const { schoolId } = SchoolIdParamsSchema.parse(request.params)
-    const denied = await requireSchoolAdminForSchoolOrAdmin(request, reply, store, schoolId)
+    const denied = await requireSchoolGovernanceReadAccess(request, reply, store, schoolId)
     if (denied) {
       return denied
     }
@@ -790,10 +947,12 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       })
     }
 
-    const bridgeState = await store.getBridgeSessionState(sessionId, userId)
+    const bridgeState = await sanitizeBridgeStateForUser(request, userId, sessionId, await store.getBridgeSessionState(sessionId, userId))
+    const runtimeClassContext = await buildRuntimeClassContext(request, userId, bridgeState)
     return {
       sessionId,
       bridgeState,
+      runtimeClassContext,
     }
   })
 
@@ -817,6 +976,15 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       return reply.status(401).send({
         error: 'unauthorized',
       })
+    }
+
+    const classResolution = await resolveEntitledClassId(store, {
+      userId,
+      roles: getRequestUserRoles(request),
+      requestedClassId: bridgeState.activeClassId,
+    })
+    if ('denied' in classResolution) {
+      return reply.status(classResolution.statusCode).send(classResolution.body)
     }
 
     const record = await store.upsertBridgeSessionState(sessionId, userId, bridgeState)
@@ -900,8 +1068,16 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
 
     const authenticatedUserId = typeof userId === 'string' ? userId : undefined
-    const { bridgeState, effectiveClassId, approvedApps, traceId, orchestratedMessages, toolDefinitions } =
-      await prepareChatInvocation(body, authenticatedUserId)
+    if (!authenticatedUserId) {
+      return reply.status(401).send({
+        error: 'unauthorized',
+      })
+    }
+    const preparedInvocation = await prepareChatInvocation(request, body, authenticatedUserId)
+    if (!preparedInvocation.ok) {
+      return reply.status(preparedInvocation.denied.statusCode).send(preparedInvocation.denied.body)
+    }
+    const { bridgeState, effectiveClassId, approvedApps, traceId, orchestratedMessages, toolDefinitions } = preparedInvocation
     const abortController = new AbortController()
     const abortStream = () => {
       if (!abortController.signal.aborted) {
@@ -1081,8 +1257,16 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
 
     const authenticatedUserId = typeof userId === 'string' ? userId : undefined
-    const { bridgeState, effectiveClassId, approvedApps, traceId, orchestratedMessages, toolDefinitions } =
-      await prepareChatInvocation(body, authenticatedUserId)
+    if (!authenticatedUserId) {
+      return reply.status(401).send({
+        error: 'unauthorized',
+      })
+    }
+    const preparedInvocation = await prepareChatInvocation(request, body, authenticatedUserId)
+    if (!preparedInvocation.ok) {
+      return reply.status(preparedInvocation.denied.statusCode).send(preparedInvocation.denied.body)
+    }
+    const { bridgeState, effectiveClassId, approvedApps, traceId, orchestratedMessages, toolDefinitions } = preparedInvocation
 
     await store.appendAuditEvent({
       timestamp: Date.now(),

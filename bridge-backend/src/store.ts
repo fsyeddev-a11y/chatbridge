@@ -669,6 +669,11 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
       return getUserProfileInternal(userId)
     },
     listSchoolsForUser(userId) {
+      const roles = getUserProfileInternal(userId)?.roles || []
+      if (roles.includes('admin')) {
+        return schoolRecords
+      }
+
       const schoolIds = new Set(listActiveSchoolMembershipsForUser(userId).map((membership) => membership.schoolId))
       return schoolRecords.filter((record) => schoolIds.has(record.schoolId))
     },
@@ -676,7 +681,24 @@ function createBridgeStoreFromData(data: BridgeStoreData, onWrite?: (nextData: B
       return listActiveSchoolMembershipsForUser(userId)
     },
     listClassesForUser(userId) {
+      const roles = getUserProfileInternal(userId)?.roles || []
+      if (roles.includes('admin')) {
+        return classRecords
+      }
+
       const classIds = new Set(listActiveClassMembershipsForUser(userId).map((membership) => membership.classId))
+      const schoolAdminSchoolIds = new Set(
+        listActiveSchoolMembershipsForUser(userId)
+          .filter((membership) => membership.membershipRole === 'school_admin')
+          .map((membership) => membership.schoolId)
+      )
+
+      if (schoolAdminSchoolIds.size > 0) {
+        classRecords
+          .filter((record) => record.schoolId && schoolAdminSchoolIds.has(record.schoolId))
+          .forEach((record) => classIds.add(record.classId))
+      }
+
       return classRecords.filter((record) => classIds.has(record.classId))
     },
     listClassMembershipsForUser(userId) {

@@ -33,6 +33,7 @@ describe('bridge-backend app', () => {
   const teacherAuth = createAuthVerifier('teacher-1', 'teacher@example.com')
   const schoolAdminAuth = createAuthVerifier('school-admin-1', 'schooladmin@example.com')
   const developerAuth = createAuthVerifier('developer-1', 'developer@example.com')
+  const pureAdminAuth = createAuthVerifier('pure-admin-1', 'admin@example.com')
 
   before(() => {
     process.env.CHATBRIDGE_ADMIN_EMAILS = 'tester@example.com,admin@example.com'
@@ -151,6 +152,38 @@ describe('bridge-backend app', () => {
     )
   })
 
+  it('forbids developers from reading governance registry and allowlist routes by role alone', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: developerAuth, chatClient: fakeChatClient })
+
+    const [registryResponse, schoolAllowlistResponse, classAllowlistResponse] = await Promise.all([
+      app.inject({
+        method: 'GET',
+        url: '/api/registry/apps',
+        headers: {
+          authorization: 'Bearer token-1',
+        },
+      }),
+      app.inject({
+        method: 'GET',
+        url: '/api/schools/demo-school/allowlist',
+        headers: {
+          authorization: 'Bearer token-1',
+        },
+      }),
+      app.inject({
+        method: 'GET',
+        url: '/api/classes/demo-class/allowlist',
+        headers: {
+          authorization: 'Bearer token-1',
+        },
+      }),
+    ])
+
+    assert.equal(registryResponse.statusCode, 403)
+    assert.equal(schoolAllowlistResponse.statusCode, 403)
+    assert.equal(classAllowlistResponse.statusCode, 403)
+  })
+
   it('persists and reloads chat sessions for the signed-in user only', async () => {
     const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: allowAllAuth, chatClient: fakeChatClient })
 
@@ -260,6 +293,10 @@ describe('bridge-backend app', () => {
     assert.equal(response.json().user.role, 'school_admin')
     assert.deepEqual(response.json().user.roles, ['school_admin'])
     assert.deepEqual(
+      response.json().classes.map((entry: { classId: string }) => entry.classId),
+      ['demo-class']
+    )
+    assert.deepEqual(
       response.json().schoolMemberships.map((entry: { schoolId: string; membershipRole: string }) => ({
         schoolId: entry.schoolId,
         membershipRole: entry.membershipRole,
@@ -271,6 +308,32 @@ describe('bridge-backend app', () => {
         },
       ]
     )
+    assert.deepEqual(response.json().memberships, [])
+  })
+
+  it('returns all schools and classes for a pure platform admin without explicit memberships', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: pureAdminAuth, chatClient: fakeChatClient })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().user.role, 'admin')
+    assert.deepEqual(response.json().user.roles, ['admin'])
+    assert.deepEqual(
+      response.json().schools.map((entry: { schoolId: string }) => entry.schoolId),
+      ['demo-school']
+    )
+    assert.deepEqual(
+      response.json().classes.map((entry: { classId: string }) => entry.classId),
+      ['demo-class']
+    )
+    assert.deepEqual(response.json().schoolMemberships, [])
     assert.deepEqual(response.json().memberships, [])
   })
 
@@ -1054,6 +1117,21 @@ describe('bridge-backend app', () => {
     assert.equal(enableResponse.json().allowlistEntry.appId, 'chess')
   })
 
+  it('allows teachers to read school approval state for their taught class school', async () => {
+    const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: teacherAuth, chatClient: fakeChatClient })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/schools/demo-school/allowlist',
+      headers: {
+        authorization: 'Bearer token-teacher',
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().schoolId, 'demo-school')
+  })
+
   it('enables and disables apps per class through the allowlist API', async () => {
     const app = createApp({ store: createInMemoryBridgeStore(), authVerifier: teacherAuth, chatClient: fakeChatClient })
 
@@ -1395,6 +1473,286 @@ describe('bridge-backend app', () => {
 
     const auditEvents = await store.listAuditEvents()
     assert.equal(auditEvents.some((event) => event.eventType === 'ChatBridgeToolInvoked'), true)
+  })
+
+  it('rejects bridge-state persistence when activeClassId is not entitled for the user', async () => {
+    const app = createApp({
+      store: createInMemoryBridgeStore(),
+      authVerifier: developerAuth,
+      chatClient: fakeChatClient,
+    })
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/sessions/session-denied/bridge-state',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        bridgeState: {
+          activeClassId: 'demo-class',
+          appContext: {},
+        },
+      },
+    })
+
+    assert.equal(response.statusCode, 403)
+    assert.deepEqual(response.json(), {
+      error: 'forbidden',
+      requiredScope: 'class_access',
+      classId: 'demo-class',
+    })
+  })
+
+  it('sanitizes bridge-state loads when the persisted activeClassId is no longer entitled', async () => {
+    const store = createInMemoryBridgeStore()
+    await store.upsertBridgeSessionState('session-load-sanitize', 'developer-1', {
+      activeClassId: 'demo-class',
+      activeAppId: 'weather',
+      appContext: {
+        weather: {
+          appId: 'weather',
+          status: 'active',
+          summary: 'Stale state',
+        },
+      },
+    })
+
+    const app = createApp({
+      store,
+      authVerifier: developerAuth,
+      chatClient: fakeChatClient,
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/session-load-sanitize/bridge-state',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.json().bridgeState.activeClassId, undefined)
+    assert.equal(response.json().bridgeState.activeAppId, undefined)
+    assert.deepEqual(response.json().runtimeClassContext, {
+      bootstrapCandidateClassIds: [],
+      reason: 'none_available',
+    })
+
+    const persisted = await store.getBridgeSessionState('session-load-sanitize', 'developer-1')
+    assert.equal(persisted?.activeClassId, undefined)
+    assert.equal(persisted?.activeAppId, undefined)
+  })
+
+  it('returns runtime class context for missing bridge-state class when the user has entitled class candidates', async () => {
+    const app = createApp({
+      store: createInMemoryBridgeStore(),
+      authVerifier: studentAuth,
+      chatClient: fakeChatClient,
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/session-runtime-context/bridge-state',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json().runtimeClassContext, {
+      bootstrapCandidateClassIds: ['demo-class'],
+      recommendedClassId: 'demo-class',
+      reason: 'missing',
+    })
+  })
+
+  it('returns runtime class context for a pure platform admin without explicit class memberships', async () => {
+    const app = createApp({
+      store: createInMemoryBridgeStore(),
+      authVerifier: pureAdminAuth,
+      chatClient: fakeChatClient,
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/session-admin-runtime/bridge-state',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json().runtimeClassContext, {
+      bootstrapCandidateClassIds: ['demo-class'],
+      recommendedClassId: 'demo-class',
+      reason: 'missing',
+    })
+  })
+
+  it('strips stale bridgeState from chat session payloads and returns canonical bridge session state only', async () => {
+    const store = createInMemoryBridgeStore()
+    const app = createApp({
+      store,
+      authVerifier: developerAuth,
+      chatClient: fakeChatClient,
+    })
+
+    const upsertResponse = await app.inject({
+      method: 'PUT',
+      url: '/api/chat-sessions/session-bridge-payload',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        session: {
+          id: 'session-bridge-payload',
+          name: 'Developer Session',
+          type: 'chat',
+          messages: [],
+          bridgeState: {
+            activeClassId: 'demo-class',
+            appContext: {},
+          },
+        },
+      },
+    })
+
+    assert.equal(upsertResponse.statusCode, 200)
+    assert.equal(upsertResponse.json().session.bridgeState, undefined)
+
+    const getResponse = await app.inject({
+      method: 'GET',
+      url: '/api/chat-sessions/session-bridge-payload',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+    })
+
+    assert.equal(getResponse.statusCode, 200)
+    assert.equal(getResponse.json().session.bridgeState, undefined)
+
+    const persistedSession = await store.getChatSession('session-bridge-payload', 'developer-1')
+    assert.equal(persistedSession?.session.bridgeState, undefined)
+  })
+
+  it('rejects backend chat generation when an explicit classId is not entitled for the user', async () => {
+    let invoked = false
+    const capturingChatClient: ChatCompletionClient = async () => {
+      invoked = true
+      return {
+        content: 'should not happen',
+        model: 'gpt-4o-mini',
+      }
+    }
+
+    const app = createApp({
+      store: createInMemoryBridgeStore(),
+      authVerifier: developerAuth,
+      chatClient: capturingChatClient,
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        classId: 'demo-class',
+        messages: [{ role: 'user', content: 'Open the weather app.' }],
+      },
+    })
+
+    assert.equal(response.statusCode, 403)
+    assert.deepEqual(response.json(), {
+      error: 'forbidden',
+      requiredScope: 'class_access',
+      classId: 'demo-class',
+    })
+    assert.equal(invoked, false)
+  })
+
+  it('rejects backend chat generation when persisted activeClassId is no longer entitled', async () => {
+    const store = createInMemoryBridgeStore()
+    await store.upsertBridgeSessionState('session-stale-class', 'developer-1', {
+      activeClassId: 'demo-class',
+      appContext: {},
+    })
+
+    let invoked = false
+    const capturingChatClient: ChatCompletionClient = async () => {
+      invoked = true
+      return {
+        content: 'should not happen',
+        model: 'gpt-4o-mini',
+      }
+    }
+
+    const app = createApp({
+      store,
+      authVerifier: developerAuth,
+      chatClient: capturingChatClient,
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chat/generate',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        sessionId: 'session-stale-class',
+        messages: [{ role: 'user', content: 'Open the weather app.' }],
+      },
+    })
+
+    assert.equal(response.statusCode, 403)
+    assert.deepEqual(response.json(), {
+      error: 'forbidden',
+      requiredScope: 'class_access',
+      classId: 'demo-class',
+    })
+    assert.equal(invoked, false)
+  })
+
+  it('rejects backend streaming chat when class scope is not entitled for the user', async () => {
+    let invoked = false
+    const fakeChatStreamClient: ChatCompletionStreamClient = async () => {
+      invoked = true
+      return {
+        content: 'should not happen',
+        model: 'gpt-4o-mini',
+      }
+    }
+
+    const app = createApp({
+      store: createInMemoryBridgeStore(),
+      authVerifier: developerAuth,
+      chatClient: fakeChatClient,
+      chatStreamClient: fakeChatStreamClient,
+    })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chat/stream',
+      headers: {
+        authorization: 'Bearer token-1',
+      },
+      payload: {
+        classId: 'demo-class',
+        messages: [{ role: 'user', content: 'Open the weather app.' }],
+      },
+    })
+
+    assert.equal(response.statusCode, 403)
+    assert.deepEqual(response.json(), {
+      error: 'forbidden',
+      requiredScope: 'class_access',
+      classId: 'demo-class',
+    })
+    assert.equal(invoked, false)
   })
 
   it('rate-limits repeated backend tool invocations per user and app', async () => {

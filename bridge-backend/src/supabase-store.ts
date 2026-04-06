@@ -473,6 +473,21 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 
     async listSchoolsForUser(userId) {
       await ensureSeeded()
+      const roles = await listActiveUserRoles(userId)
+      if (roles.includes('admin')) {
+        const { data, error } = await client
+          .from('schools')
+          .select('id, name, created_at, updated_at')
+          .order('created_at', { ascending: true })
+          .returns<SupabaseSchoolRow[]>()
+
+        if (error) {
+          throw error
+        }
+
+        return (data || []).map(mapSchoolRow)
+      }
+
       const membershipRows = await listActiveSchoolMembershipRows(userId)
       const schoolIds = membershipRows.map((row) => row.school_id)
       if (!schoolIds.length) {
@@ -501,16 +516,54 @@ export function createSupabaseBridgeStore(client = createSupabaseBridgeStoreClie
 
     async listClassesForUser(userId) {
       await ensureSeeded()
+      const roles = await listActiveUserRoles(userId)
+      if (roles.includes('admin')) {
+        const { data, error } = await client
+          .from('classes')
+          .select('id, name, organization_id, school_id, external_ref, created_at, updated_at')
+          .order('created_at', { ascending: true })
+          .returns<SupabaseClassRow[]>()
+
+        if (error) {
+          throw error
+        }
+
+        return (data || []).map(mapClassRow)
+      }
+
+      const schoolMembershipRows = await listActiveSchoolMembershipRows(userId)
       const membershipRows = await listActiveClassMembershipRows(userId)
-      const classIds = membershipRows.map((row) => row.class_id)
-      if (!classIds.length) {
+      const classIds = new Set(membershipRows.map((row) => row.class_id))
+      const managedSchoolIds = schoolMembershipRows
+        .filter((row) => row.membership_role === 'school_admin')
+        .map((row) => row.school_id)
+
+      if (managedSchoolIds.length) {
+        const { data: managedClassRows, error: managedClassError } = await client
+          .from('classes')
+          .select('id, name, organization_id, school_id, external_ref, created_at, updated_at')
+          .in('school_id', managedSchoolIds)
+          .order('created_at', { ascending: true })
+          .returns<SupabaseClassRow[]>()
+
+        if (managedClassError) {
+          throw managedClassError
+        }
+
+        for (const row of managedClassRows || []) {
+          classIds.add(row.id)
+        }
+      }
+
+      const selectedClassIds = [...classIds]
+      if (!selectedClassIds.length) {
         return []
       }
 
       const { data, error } = await client
         .from('classes')
-        .select('id, name, organization_id, external_ref, created_at, updated_at')
-        .in('id', classIds)
+        .select('id, name, organization_id, school_id, external_ref, created_at, updated_at')
+        .in('id', selectedClassIds)
         .order('created_at', { ascending: true })
         .returns<SupabaseClassRow[]>()
 
