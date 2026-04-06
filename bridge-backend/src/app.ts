@@ -89,6 +89,7 @@ export function getConfiguredAllowedOrigins(envValue = process.env.CHATBRIDGE_AL
 
 export function createApp(options: AppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false })
+  // Deployment marker for backend-only redeploys.
   const store = options.store ?? createInMemoryBridgeStore()
   const allowedOrigins = new Set(options.allowedOrigins ?? getConfiguredAllowedOrigins())
   const authVerifier = options.authVerifier ?? createSupabaseAuthVerifier()
