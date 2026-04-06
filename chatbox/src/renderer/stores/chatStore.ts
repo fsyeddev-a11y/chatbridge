@@ -463,6 +463,14 @@ export async function insertMessage(sessionId: string, message: Message, previou
       throw new Error(`session ${sessionId} not found`)
     }
 
+     const messageAlreadyExists =
+      session.messages.some((entry) => entry.id === message.id) ||
+      (session.threads || []).some((thread) => thread.messages.some((entry) => entry.id === message.id))
+
+    if (messageAlreadyExists) {
+      return session
+    }
+
     if (previousId) {
       // try to find insert position in message list
       let previousIndex = session.messages.findIndex((m) => m.id === previousId)
