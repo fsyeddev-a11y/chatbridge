@@ -1917,7 +1917,7 @@ function createSupabaseSeedData(): SupabaseSeedData {
       tools: [
         {
           name: 'chatbridge_google_classroom_overview',
-          description: 'Retrieve a read-only summary of the student classroom workload.',
+          description: 'Open Google Classroom so the student can connect their account and view courses and assignments.',
         },
       ],
     },
