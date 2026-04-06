@@ -111,6 +111,7 @@ export type BridgeStoreDriver = 'file' | 'supabase'
 const DEFAULT_WEATHER_APP_URL = 'http://localhost:4173'
 const DEFAULT_CHESS_APP_URL = 'http://localhost:4174'
 const DEFAULT_TRIVIA_APP_URL = 'http://localhost:4175'
+const DEFAULT_CLASSROOM_APP_URL = 'http://localhost:4176'
 const DEMO_SCHOOL_ID = 'demo-school'
 const DEMO_CLASS_ID = 'demo-class'
 
@@ -147,6 +148,18 @@ export function getConfiguredTriviaAppUrl(envValue = process.env.CHATBRIDGE_TRIV
     return new URL(envValue).toString().replace(/\/$/, '')
   } catch {
     return DEFAULT_TRIVIA_APP_URL
+  }
+}
+
+export function getConfiguredClassroomAppUrl(envValue = process.env.CHATBRIDGE_CLASSROOM_APP_URL) {
+  if (!envValue) {
+    return DEFAULT_CLASSROOM_APP_URL
+  }
+
+  try {
+    return new URL(envValue).toString().replace(/\/$/, '')
+  } catch {
+    return DEFAULT_CLASSROOM_APP_URL
   }
 }
 
@@ -254,7 +267,8 @@ function createSeedData(): BridgeStoreData {
       description: 'Read-only classroom context for due dates and coursework.',
       developerName: 'ChatBridge Demo',
       executionModel: 'iframe',
-      allowedOrigins: ['https://apps.chatbridge.local'],
+      launchUrl: getConfiguredClassroomAppUrl(),
+      allowedOrigins: getAllowedOriginsForLaunchUrl(getConfiguredClassroomAppUrl()),
       authType: 'oauth2',
       oauthProvider: 'google',
       oauthScopes: [

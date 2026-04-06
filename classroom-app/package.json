@@ -1,0 +1,10 @@
+{
+  "name": "chatbridge-classroom-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check src/main.js && node --check src/bridge.js",
+    "serve": "sh -c 'python3 -m http.server ${PORT:-4176}'"
+  }
+}

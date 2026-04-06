@@ -19,7 +19,7 @@ import type {
   SessionBridgeState,
   UserProfile,
 } from './types.js'
-import { getAllowedOriginsForLaunchUrl, getConfiguredChessAppUrl, getConfiguredTriviaAppUrl, getConfiguredWeatherAppUrl, type BridgeStore } from './store.js'
+import { getAllowedOriginsForLaunchUrl, getConfiguredChessAppUrl, getConfiguredClassroomAppUrl, getConfiguredTriviaAppUrl, getConfiguredWeatherAppUrl, type BridgeStore } from './store.js'
 import {
   normalizeRoles,
   resolveDefaultSchoolMembershipRoles,
@@ -2041,6 +2041,19 @@ function migrateManifest(manifest: AppManifest): AppManifest {
 
   if (manifest.appId === 'trivia') {
     const launchUrl = manifest.launchUrl || getConfiguredTriviaAppUrl()
+    return {
+      ...manifest,
+      launchUrl,
+      allowedOrigins:
+        manifest.allowedOrigins?.length && !manifest.allowedOrigins.includes('https://apps.chatbridge.local')
+          ? manifest.allowedOrigins
+          : getAllowedOriginsForLaunchUrl(launchUrl),
+      heartbeatTimeoutMs: manifest.heartbeatTimeoutMs || 10000,
+    }
+  }
+
+  if (manifest.appId === 'google-classroom') {
+    const launchUrl = manifest.launchUrl || getConfiguredClassroomAppUrl()
     return {
       ...manifest,
       launchUrl,
