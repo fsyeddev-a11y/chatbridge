@@ -1,0 +1,11 @@
+{
+  "name": "chatbridge-trivia-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/main.js && node --check src/bridge.js && node --check src/trivia.js",
+    "serve": "sh -c 'python3 -m http.server ${PORT:-4175}'"
+  }
+}

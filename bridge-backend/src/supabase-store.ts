@@ -19,7 +19,7 @@ import type {
   SessionBridgeState,
   UserProfile,
 } from './types.js'
-import { getAllowedOriginsForLaunchUrl, getConfiguredChessAppUrl, getConfiguredWeatherAppUrl, type BridgeStore } from './store.js'
+import { getAllowedOriginsForLaunchUrl, getConfiguredChessAppUrl, getConfiguredTriviaAppUrl, getConfiguredWeatherAppUrl, type BridgeStore } from './store.js'
 import {
   normalizeRoles,
   resolveDefaultSchoolMembershipRoles,
@@ -1921,6 +1921,26 @@ function createSupabaseSeedData(): SupabaseSeedData {
         },
       ],
     },
+    {
+      appId: 'trivia',
+      name: 'Science Trivia',
+      version: '1.0.0',
+      description: 'Multiple-choice science trivia quiz with adjustable difficulty.',
+      developerName: 'ChatBridge Demo',
+      executionModel: 'iframe',
+      allowedOrigins: ['https://apps.chatbridge.local'],
+      heartbeatTimeoutMs: 10000,
+      authType: 'none',
+      subjectTags: ['Science', 'General Knowledge'],
+      gradeBand: 'K-12',
+      llmSafeFields: ['score', 'totalAnswered', 'totalQuestions', 'category', 'difficulty'],
+      tools: [
+        {
+          name: 'chatbridge_trivia_start_quiz',
+          description: 'Start a science trivia quiz for the student.',
+        },
+      ],
+    },
   ] satisfies AppManifest[]).map((manifest) => migrateManifest(manifest))
 
   const appVersions: AppVersionRecord[] = manifests.map((manifest) => ({
@@ -1975,6 +1995,7 @@ function createSupabaseSeedData(): SupabaseSeedData {
         enabledAt: now,
         disabledAt: undefined,
       },
+      { schoolId: DEMO_SCHOOL_ID, appId: 'trivia', enabledBy: 'school-admin-demo', enabledAt: now, disabledAt: undefined },
     ],
     classAllowlist: [
       { classId: DEMO_CLASS_ID, appId: 'chess', enabledBy: 'teacher-demo', enabledAt: now, disabledAt: undefined },
@@ -1986,6 +2007,7 @@ function createSupabaseSeedData(): SupabaseSeedData {
         enabledAt: now,
         disabledAt: undefined,
       },
+      { classId: DEMO_CLASS_ID, appId: 'trivia', enabledBy: 'teacher-demo', enabledAt: now, disabledAt: undefined },
     ],
   }
 }
@@ -2014,6 +2036,19 @@ function migrateManifest(manifest: AppManifest): AppManifest {
           ? manifest.allowedOrigins
           : getAllowedOriginsForLaunchUrl(launchUrl),
       heartbeatTimeoutMs: manifest.heartbeatTimeoutMs || 15000,
+    }
+  }
+
+  if (manifest.appId === 'trivia') {
+    const launchUrl = manifest.launchUrl || getConfiguredTriviaAppUrl()
+    return {
+      ...manifest,
+      launchUrl,
+      allowedOrigins:
+        manifest.allowedOrigins?.length && !manifest.allowedOrigins.includes('https://apps.chatbridge.local')
+          ? manifest.allowedOrigins
+          : getAllowedOriginsForLaunchUrl(launchUrl),
+      heartbeatTimeoutMs: manifest.heartbeatTimeoutMs || 10000,
     }
   }
 

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Science Trivia</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <div id="message-banner" class="banner"></div>
+
+      <div id="setup-area" class="setup">
+        <div class="field">
+          <label for="category-select">Category</label>
+          <select id="category-select"></select>
+        </div>
+        <div class="field">
+          <label for="difficulty-select">Difficulty</label>
+          <select id="difficulty-select">
+            <option value="easy">Easy</option>
+            <option value="medium">Medium</option>
+            <option value="hard">Hard</option>
+          </select>
+        </div>
+        <button id="start-btn" type="button">Start Quiz</button>
+      </div>
+
+      <div id="quiz-area" class="quiz hidden">
+        <div class="quiz-header">
+          <span id="progress">Question 1 of 5</span>
+          <span id="score-text">Score: 0/0</span>
+        </div>
+        <p id="question-text" class="question"></p>
+        <div id="answers" class="answers"></div>
+        <button id="end-btn" type="button" class="end-btn">End Quiz</button>
+      </div>
+    </main>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

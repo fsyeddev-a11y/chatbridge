@@ -110,6 +110,7 @@ export type BridgeStoreDriver = 'file' | 'supabase'
 
 const DEFAULT_WEATHER_APP_URL = 'http://localhost:4173'
 const DEFAULT_CHESS_APP_URL = 'http://localhost:4174'
+const DEFAULT_TRIVIA_APP_URL = 'http://localhost:4175'
 const DEMO_SCHOOL_ID = 'demo-school'
 const DEMO_CLASS_ID = 'demo-class'
 
@@ -134,6 +135,18 @@ export function getConfiguredChessAppUrl(envValue = process.env.CHATBRIDGE_CHESS
     return new URL(envValue).toString().replace(/\/$/, '')
   } catch {
     return DEFAULT_CHESS_APP_URL
+  }
+}
+
+export function getConfiguredTriviaAppUrl(envValue = process.env.CHATBRIDGE_TRIVIA_APP_URL) {
+  if (!envValue) {
+    return DEFAULT_TRIVIA_APP_URL
+  }
+
+  try {
+    return new URL(envValue).toString().replace(/\/$/, '')
+  } catch {
+    return DEFAULT_TRIVIA_APP_URL
   }
 }
 
@@ -258,6 +271,27 @@ function createSeedData(): BridgeStoreData {
         },
       ],
     },
+    {
+      appId: 'trivia',
+      name: 'Science Trivia',
+      version: '1.0.0',
+      description: 'Multiple-choice science trivia quiz with adjustable difficulty.',
+      developerName: 'ChatBridge Demo',
+      executionModel: 'iframe',
+      launchUrl: getConfiguredTriviaAppUrl(),
+      allowedOrigins: getAllowedOriginsForLaunchUrl(getConfiguredTriviaAppUrl()),
+      heartbeatTimeoutMs: 10000,
+      authType: 'none',
+      subjectTags: ['Science', 'General Knowledge'],
+      gradeBand: 'K-12',
+      llmSafeFields: ['score', 'totalAnswered', 'totalQuestions', 'category', 'difficulty'],
+      tools: [
+        {
+          name: 'chatbridge_trivia_start_quiz',
+          description: 'Start a science trivia quiz for the student.',
+        },
+      ],
+    },
   ]
 
   const appVersions: AppVersionRecord[] = seededManifests.map((manifest) => ({
@@ -310,11 +344,13 @@ function createSeedData(): BridgeStoreData {
       { schoolId: DEMO_SCHOOL_ID, appId: 'chess', enabledBy: 'school-admin-demo', enabledAt: now },
       { schoolId: DEMO_SCHOOL_ID, appId: 'weather', enabledBy: 'school-admin-demo', enabledAt: now },
       { schoolId: DEMO_SCHOOL_ID, appId: 'google-classroom', enabledBy: 'school-admin-demo', enabledAt: now },
+      { schoolId: DEMO_SCHOOL_ID, appId: 'trivia', enabledBy: 'school-admin-demo', enabledAt: now },
     ],
     classAllowlist: [
       { classId: DEMO_CLASS_ID, appId: 'chess', enabledBy: 'teacher-demo', enabledAt: now },
       { classId: DEMO_CLASS_ID, appId: 'weather', enabledBy: 'teacher-demo', enabledAt: now },
       { classId: DEMO_CLASS_ID, appId: 'google-classroom', enabledBy: 'teacher-demo', enabledAt: now },
+      { classId: DEMO_CLASS_ID, appId: 'trivia', enabledBy: 'teacher-demo', enabledAt: now },
     ],
     auditEvents: [],
     reviewActions: [],
