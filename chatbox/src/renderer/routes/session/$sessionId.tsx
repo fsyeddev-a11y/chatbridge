@@ -10,7 +10,7 @@ import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import InputBox from '@/components/InputBox/InputBox'
 import Header from '@/components/layout/Header'
 import ChatBridgePanel from '@/components/session/ChatBridgePanel'
-import ChatBridgeShelf from '@/components/session/ChatBridgeShelf'
+// ChatBridgeShelf moved into InputBox toolbar
 import ThreadHistoryDrawer from '@/components/session/ThreadHistoryDrawer'
 import { hydrateBridgeStateFromBackend } from '@/packages/chatbridge/session'
 import { useUIStore } from '@/stores/uiStore'
@@ -199,7 +199,6 @@ function RouteComponent() {
   return currentSession ? (
     <div className="flex flex-col h-full">
       <Header session={currentSession} />
-      <ChatBridgeShelf session={currentSession} />
       <ChatBridgePanel session={currentSession} />
 
       {/* MessageList 设置 key，确保每个 session 对应新的 MessageList 实例 */}

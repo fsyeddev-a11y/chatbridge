@@ -1,6 +1,7 @@
 import NiceModal from '@ebay/nice-modal-react'
 import {
   ActionIcon,
+  Badge,
   Box,
   Button,
   Flex,
@@ -24,6 +25,7 @@ import { formatNumber } from '@shared/utils'
 import {
   IconAdjustmentsHorizontal,
   IconAlertCircle,
+  IconApps,
   IconArrowBackUp,
   IconArrowUp,
   IconChevronRight,
@@ -60,6 +62,8 @@ import {
   isCompactionInProgress,
   useContextTokens,
 } from '@/packages/context-management'
+import { useApprovedChatBridgeAppsForClass } from '@/packages/chatbridge/registry'
+import { activateBridgeApp, getSessionBridgeState } from '@/packages/chatbridge/session'
 import { trackingEvent } from '@/packages/event'
 import { getModelContextWindowSync } from '@/packages/model-context'
 import * as picUtils from '@/packages/pic_utils'
@@ -163,6 +167,16 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
 
     const currentSessionId = sessionId
     const isNewSession = currentSessionId === 'new'
+
+    // ChatBridge app shelf in toolbar
+    const { session: currentSessionForBridge } = useSession(currentSessionId || null)
+    const bridgeState = useMemo(
+      () => (currentSessionForBridge ? getSessionBridgeState(currentSessionForBridge) : { activeClassId: undefined, activeAppId: undefined, appContext: {} }),
+      [currentSessionForBridge]
+    )
+    const { data: bridgeApps = [] } = useApprovedChatBridgeAppsForClass(bridgeState.activeClassId || '', {
+      enabled: !!bridgeState.activeClassId,
+    })
 
     // Session-level web browsing mode
     const sessionWebBrowsingMap = useUIStore((s) => s.sessionWebBrowsingMap)
@@ -1128,6 +1142,37 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
                       </UnstyledButton>
                     </Tooltip>
                   ))}
+
+                {!isSmallScreen && bridgeApps.length > 0 && (
+                  <Menu trigger="click" position="top-end" width={220}>
+                    <Menu.Target>
+                      <Tooltip label="ChatBridge Apps" position="top" withArrow>
+                        <UnstyledButton
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-[var(--chatbox-background-tertiary)] transition-colors"
+                        >
+                          <IconApps
+                            size={toolbarIconSize}
+                            strokeWidth={1.8}
+                            className={bridgeState.activeAppId ? 'text-[var(--chatbox-tint-brand)]' : 'text-[var(--chatbox-tint-secondary)]'}
+                          />
+                        </UnstyledButton>
+                      </Tooltip>
+                    </Menu.Target>
+                    <Menu.Dropdown>
+                      <Menu.Label>Apps ({bridgeState.activeClassId})</Menu.Label>
+                      {bridgeApps.map((app) => (
+                        <Menu.Item
+                          key={app.appId}
+                          disabled={!app.launchUrl}
+                          onClick={() => currentSessionId && void activateBridgeApp(currentSessionId, app.appId)}
+                          rightSection={bridgeState.activeAppId === app.appId ? <Badge size="xs" variant="filled">Active</Badge> : null}
+                        >
+                          {app.name}
+                        </Menu.Item>
+                      ))}
+                    </Menu.Dropdown>
+                  </Menu>
+                )}
 
                 {!isSmallScreen && (
                   <Tooltip label={t('Conversation Settings')} position="top" withArrow>
