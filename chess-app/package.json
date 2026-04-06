@@ -1,0 +1,14 @@
+{
+  "name": "chatbridge-chess-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/main.js && node --check src/bridge.js && node --check src/chess.js && node --check src/hints.js && node --check src/state-summary.js && node --check src/ai.js",
+    "serve": "sh -c 'python3 -m http.server ${PORT:-4174}'"
+  },
+  "dependencies": {
+    "stockfish": "^18.0.7"
+  }
+}

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ChatBridge Chess App</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">ChatBridge App</p>
+        <h1>Chess Coach</h1>
+        <p class="lede">
+          Interactive chess board for TutorMeAI. The app validates legal moves and sends Bridge-safe game state to the
+          host while tutoring stays in chat.
+        </p>
+      </section>
+
+      <section class="layout">
+        <section class="panel board-panel">
+          <div class="panel-header">
+            <div>
+              <p class="label">Bridge status</p>
+              <p id="bridge-status" class="value">Waiting for TutorMeAI INIT.</p>
+            </div>
+            <div>
+              <p class="label">Game status</p>
+              <p id="game-status" class="value">New game pending</p>
+            </div>
+          </div>
+
+          <div id="message-banner" class="message-banner" role="status" aria-live="polite"></div>
+
+          <div class="turn-callout">
+            <p class="label">Turn</p>
+            <p id="turn-indicator" class="turn-indicator white">White to move</p>
+          </div>
+
+          <div class="board-meta">
+            <div class="meta-card">
+              <p class="label">Side to move</p>
+              <p id="side-to-move" class="value">White</p>
+            </div>
+            <div class="meta-card">
+              <p class="label">Phase</p>
+              <p id="phase-text" class="value">Opening</p>
+            </div>
+            <div class="meta-card">
+              <p class="label">Last move</p>
+              <p id="last-move" class="value">None</p>
+            </div>
+          </div>
+
+          <div class="board-shell">
+            <div id="board" class="board" aria-label="Interactive chess board"></div>
+            <div class="board-footer">
+              <p id="board-caption" class="caption">
+                Need help with this position? Ask TutorMeAI in chat: "what should I do here?"
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel sidebar">
+          <div class="card">
+            <p class="label">Opponent</p>
+            <label for="opponent-select" class="label">Mode</label>
+            <select id="opponent-select" class="select-input">
+              <option value="human">Human vs Human</option>
+              <option value="easy">Easy AI</option>
+              <option value="medium">Medium AI</option>
+              <option value="hard">Hard AI</option>
+            </select>
+            <p id="opponent-status" class="body-text">Play locally against another human, or choose an AI opponent.</p>
+          </div>
+
+          <div class="controls">
+            <button id="new-game-btn" type="button">New Game</button>
+            <button id="resign-btn" type="button" class="secondary">Resign</button>
+            <button id="end-session-btn" type="button" class="secondary">End Session</button>
+          </div>
+
+          <div class="sidebar-grid">
+            <div class="card">
+              <p class="label">Position summary</p>
+              <p id="position-summary" class="body-text">Start a new game to begin.</p>
+            </div>
+
+            <div class="card">
+              <p class="label">Captured by White</p>
+              <p id="captured-white" class="body-text">None</p>
+            </div>
+
+            <div class="card">
+              <p class="label">Captured by Black</p>
+              <p id="captured-black" class="body-text">None</p>
+            </div>
+
+            <div class="card history-card">
+              <p class="label">Move history</p>
+              <ol id="move-history" class="history-list"></ol>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
