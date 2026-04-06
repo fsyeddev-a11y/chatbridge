@@ -332,15 +332,11 @@ function finishGame(reason) {
 function restoreFromState(previousState) {
   if (!previousState) {
     game = createInitialGame()
-    opponentMode = 'human'
+    opponentMode = 'easy'
     aiThinking = false
     return false
   }
-  if (typeof previousState.opponentMode === 'string' && ['human', 'easy', 'medium', 'hard'].includes(previousState.opponentMode)) {
-    opponentMode = previousState.opponentMode
-  } else {
-    opponentMode = 'easy'
-  }
+  opponentMode = 'easy'
   aiThinking = false
   game = restoreGameFromState(previousState)
   return true
@@ -365,7 +361,7 @@ const bridge = createBridge({
       void maybeTriggerAIMove()
     } catch (error) {
       game = createInitialGame()
-      opponentMode = 'human'
+      opponentMode = 'easy'
       aiThinking = false
       syncBridgeState({ lastError: null })
       const message = error instanceof Error ? error.message : 'Failed to restore chess state.'
@@ -383,18 +379,6 @@ const bridge = createBridge({
     setBanner('TutorMeAI ended this chess session.', 'warning')
     render()
   },
-})
-
-opponentSelect.addEventListener('change', () => {
-  opponentMode = opponentSelect.value
-  syncBridgeState({ lastError: null })
-  setBanner(
-    isAIEnabled()
-      ? `${getAILevelConfig(opponentMode).label} enabled. It will play as Black in the next position.`
-      : 'Human vs Human mode enabled.'
-  )
-  bridge.sendStateUpdate(buildStateUpdateSummary(latestBridgeState), latestBridgeState)
-  void maybeTriggerAIMove()
 })
 
 newGameButton.addEventListener('click', () => {
