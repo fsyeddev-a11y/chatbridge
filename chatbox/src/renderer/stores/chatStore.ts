@@ -150,6 +150,43 @@ function _setSessionCache(sessionId: string, updated: Session | null) {
   queryClient.setQueryData(QueryKeys.ChatSession(sessionId), updated)
 }
 
+function getAllSessionMessageIds(session: Session | null | undefined) {
+  if (!session) {
+    return new Set<string>()
+  }
+
+  const ids = new Set(session.messages.map((message) => message.id))
+  for (const thread of session.threads || []) {
+    for (const message of thread.messages) {
+      ids.add(message.id)
+    }
+  }
+  return ids
+}
+
+function mergeSessionWithLocalConversation(localSession: Session | null | undefined, backendSession: Session) {
+  if (!localSession) {
+    return backendSession
+  }
+
+  const localMessageIds = getAllSessionMessageIds(localSession)
+  const backendMessageIds = getAllSessionMessageIds(backendSession)
+  const backendMessagesCoveredByLocal = [...backendMessageIds].every((messageId) => localMessageIds.has(messageId))
+
+  if (!backendMessagesCoveredByLocal || localMessageIds.size <= backendMessageIds.size) {
+    return backendSession
+  }
+
+  return {
+    ...backendSession,
+    messages: localSession.messages,
+    threads: localSession.threads,
+    threadName: localSession.threadName,
+    messageForksHash: localSession.messageForksHash,
+    compactionPoints: localSession.compactionPoints,
+  }
+}
+
 function applySessionUpdater(sessionId: string, prev: Session | null | undefined, updater: Updater<Session>) {
   if (!prev) {
     throw new Error(`Session ${sessionId} not found`)
@@ -320,10 +357,13 @@ export async function refreshSessionFromBackend(sessionId: string) {
     return await getSession(sessionId)
   }
 
-  const session = await _getSessionById(sessionId)
-  if (!session) {
+  const backendSession = await _getSessionById(sessionId)
+  if (!backendSession) {
     return null
   }
+
+  const currentSession = queryClient.getQueryData(QueryKeys.ChatSession(sessionId)) as Session | null | undefined
+  const session = mergeSessionWithLocalConversation(currentSession, backendSession)
 
   _setSessionCache(sessionId, session)
   queryClient.setQueryData(QueryKeys.ChatSessionsList, (current: SessionMeta[] | undefined) => {
