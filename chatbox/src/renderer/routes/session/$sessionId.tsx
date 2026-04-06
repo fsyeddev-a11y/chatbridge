@@ -43,6 +43,7 @@ function RouteComponent() {
   )
 
   const messageListRef = useRef<MessageListRef>(null)
+  const handledPendingSubmissionRef = useRef<string | null>(null)
 
   const goHome = useCallback(() => {
     navigate({ to: '/', replace: true })
@@ -67,6 +68,12 @@ function RouteComponent() {
     if (!currentSession || !pendingSubmission || pendingSubmission.sessionId !== currentSession.id) {
       return
     }
+
+    const pendingSubmissionKey = `${pendingSubmission.sessionId}:${pendingSubmission.constructedMessage.id}`
+    if (handledPendingSubmissionRef.current === pendingSubmissionKey) {
+      return
+    }
+    handledPendingSubmissionRef.current = pendingSubmissionKey
 
     setNewSessionState((prev) => ({
       ...prev,
