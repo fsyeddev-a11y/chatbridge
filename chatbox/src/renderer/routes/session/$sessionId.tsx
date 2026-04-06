@@ -197,7 +197,8 @@ function RouteComponent() {
   }, [currentSession?.settings?.provider, currentSession?.settings?.modelId])
 
   const hasBridgeApp = useMemo(() => {
-    const bs = getSessionBridgeState(currentSession!)
+    if (!currentSession) return false
+    const bs = getSessionBridgeState(currentSession)
     return !!bs.activeAppId
   }, [currentSession])
 
