@@ -24,6 +24,8 @@
 
 body {
   margin: 0;
+  height: 100vh;
+  overflow: hidden;
   font-family: "Avenir Next", "Segoe UI", sans-serif;
   color: var(--text);
   background: var(--bg);
@@ -33,8 +35,9 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 8px;
-  gap: 8px;
+  height: 100vh;
+  padding: 6px;
+  gap: 6px;
 }
 
 .message-banner {
@@ -60,10 +63,12 @@ body {
 .board-shell {
   display: flex;
   justify-content: center;
+  flex: 1;
+  min-height: 0;
 }
 
 .board {
-  width: min(100%, 480px);
+  height: 100%;
   aspect-ratio: 1;
   display: grid;
   grid-template-columns: repeat(8, 1fr);
