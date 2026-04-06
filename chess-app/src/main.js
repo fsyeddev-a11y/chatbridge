@@ -23,7 +23,7 @@ import {
   buildStateUpdateSummary,
 } from './state-summary.js'
 
-const appId = 'chess-app'
+const appId = 'chess'
 const boardElement = document.getElementById('board')
 const bridgeStatus = document.getElementById('bridge-status')
 const gameStatus = document.getElementById('game-status')
