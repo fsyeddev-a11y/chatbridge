@@ -12,7 +12,7 @@ import Header from '@/components/layout/Header'
 import ChatBridgePanel from '@/components/session/ChatBridgePanel'
 // ChatBridgeShelf moved into InputBox toolbar
 import ThreadHistoryDrawer from '@/components/session/ThreadHistoryDrawer'
-import { hydrateBridgeStateFromBackend } from '@/packages/chatbridge/session'
+import { getSessionBridgeState, hydrateBridgeStateFromBackend } from '@/packages/chatbridge/session'
 import { useUIStore } from '@/stores/uiStore'
 import { updateSession as updateSessionStore, useSession } from '@/stores/chatStore'
 import { lastUsedModelStore } from '@/stores/lastUsedModelStore'
@@ -196,36 +196,48 @@ function RouteComponent() {
     }
   }, [currentSession?.settings?.provider, currentSession?.settings?.modelId])
 
+  const hasBridgeApp = useMemo(() => {
+    const bs = getSessionBridgeState(currentSession!)
+    return !!bs.activeAppId
+  }, [currentSession])
+
   return currentSession ? (
-    <div className="flex flex-col h-full">
-      <Header session={currentSession} />
-      <ChatBridgePanel session={currentSession} />
+    <div className="flex h-full">
+      {/* Left: Chat column */}
+      <div className={`flex flex-col h-full ${hasBridgeApp ? 'w-1/2' : 'w-full'} min-w-0 transition-all`}>
+        <Header session={currentSession} />
 
-      {/* MessageList 设置 key，确保每个 session 对应新的 MessageList 实例 */}
-      <MessageList
-        ref={messageListRef}
-        key={`message-list${currentSessionId}`}
-        currentSession={currentSession}
-        className="flex-1 min-h-0"
-      />
-
-      {/* <ScrollButtons /> */}
-      <ErrorBoundary name="session-inputbox">
-        <InputBox
-          key={`input-box${currentSession.id}`}
-          sessionId={currentSession.id}
-          sessionType={currentSession.type}
-          model={model}
-          onStartNewThread={onStartNewThread}
-          onRollbackThread={onRollbackThread}
-          onSelectModel={onSelectModel}
-          onClickSessionSettings={onClickSessionSettings}
-          generating={!!lastGeneratingMessage}
-          onSubmit={onSubmit}
-          onStopGenerating={onStopGenerating}
+        <MessageList
+          ref={messageListRef}
+          key={`message-list${currentSessionId}`}
+          currentSession={currentSession}
+          className="flex-1 min-h-0"
         />
-      </ErrorBoundary>
-      <ThreadHistoryDrawer session={currentSession} />
+
+        <ErrorBoundary name="session-inputbox">
+          <InputBox
+            key={`input-box${currentSession.id}`}
+            sessionId={currentSession.id}
+            sessionType={currentSession.type}
+            model={model}
+            onStartNewThread={onStartNewThread}
+            onRollbackThread={onRollbackThread}
+            onSelectModel={onSelectModel}
+            onClickSessionSettings={onClickSessionSettings}
+            generating={!!lastGeneratingMessage}
+            onSubmit={onSubmit}
+            onStopGenerating={onStopGenerating}
+          />
+        </ErrorBoundary>
+        <ThreadHistoryDrawer session={currentSession} />
+      </div>
+
+      {/* Right: App sidebar (only when an app is active) */}
+      {hasBridgeApp && (
+        <div className="w-1/2 h-full border-l border-gray-200 min-w-0">
+          <ChatBridgePanel session={currentSession} />
+        </div>
+      )}
     </div>
   ) : (
     !isFetching && (

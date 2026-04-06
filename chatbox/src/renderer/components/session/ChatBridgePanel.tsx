@@ -234,8 +234,8 @@ export default function ChatBridgePanel({ session }: ChatBridgePanelProps) {
   }
 
   return (
-    <Card withBorder radius="lg" p="md" className="mx-3 mt-3 sm:mx-4">
-      <Stack gap="sm">
+    <div className="flex flex-col h-full p-3">
+      <Stack gap="sm" className="flex-1 min-h-0">
         <Group justify="space-between" align="flex-start">
           <div>
             <Group gap={8}>
@@ -387,12 +387,12 @@ export default function ChatBridgePanel({ session }: ChatBridgePanelProps) {
             </Stack>
           </Alert>
         ) : activeContext?.status === 'error' ? null : (
-          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white">
+          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white flex-1 min-h-0">
             <iframe
               ref={iframeRef}
               title={`${activeApp.name} iframe`}
               key={activeApp.appId}
-              className="h-[600px] w-full bg-white"
+              className="h-full w-full bg-white"
               sandbox={iframeSandbox}
               src={activeApp.launchUrl}
               onLoad={sendInitMessage}
@@ -400,6 +400,6 @@ export default function ChatBridgePanel({ session }: ChatBridgePanelProps) {
           </div>
         )}
       </Stack>
-    </Card>
+    </div>
   )
 }
