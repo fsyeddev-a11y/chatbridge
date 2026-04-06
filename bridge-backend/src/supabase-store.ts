@@ -19,7 +19,7 @@ import type {
   SessionBridgeState,
   UserProfile,
 } from './types.js'
-import { getAllowedOriginsForLaunchUrl, getConfiguredWeatherAppUrl, type BridgeStore } from './store.js'
+import { getAllowedOriginsForLaunchUrl, getConfiguredChessAppUrl, getConfiguredWeatherAppUrl, type BridgeStore } from './store.js'
 import {
   normalizeRoles,
   resolveDefaultSchoolMembershipRoles,
@@ -1991,21 +1991,33 @@ function createSupabaseSeedData(): SupabaseSeedData {
 }
 
 function migrateManifest(manifest: AppManifest): AppManifest {
-  if (manifest.appId !== 'weather') {
-    return manifest
+  if (manifest.appId === 'weather') {
+    const launchUrl = manifest.launchUrl || getConfiguredWeatherAppUrl()
+    return {
+      ...manifest,
+      launchUrl,
+      allowedOrigins:
+        manifest.allowedOrigins?.length && !manifest.allowedOrigins.includes('https://apps.chatbridge.local')
+          ? manifest.allowedOrigins
+          : getAllowedOriginsForLaunchUrl(launchUrl),
+      heartbeatTimeoutMs: manifest.heartbeatTimeoutMs || 10000,
+    }
   }
 
-  const launchUrl = manifest.launchUrl || getConfiguredWeatherAppUrl()
-
-  return {
-    ...manifest,
-    launchUrl,
-    allowedOrigins:
-      manifest.allowedOrigins?.length && !manifest.allowedOrigins.includes('https://apps.chatbridge.local')
-        ? manifest.allowedOrigins
-        : getAllowedOriginsForLaunchUrl(launchUrl),
-    heartbeatTimeoutMs: manifest.heartbeatTimeoutMs || 10000,
+  if (manifest.appId === 'chess') {
+    const launchUrl = manifest.launchUrl || getConfiguredChessAppUrl()
+    return {
+      ...manifest,
+      launchUrl,
+      allowedOrigins:
+        manifest.allowedOrigins?.length && !manifest.allowedOrigins.includes('https://apps.chatbridge.local')
+          ? manifest.allowedOrigins
+          : getAllowedOriginsForLaunchUrl(launchUrl),
+      heartbeatTimeoutMs: manifest.heartbeatTimeoutMs || 15000,
+    }
   }
+
+  return manifest
 }
 
 function buildVersionRecordId(appId: string, version: string) {

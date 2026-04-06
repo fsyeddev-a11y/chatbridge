@@ -109,6 +109,7 @@ export type BridgeStoreData = {
 export type BridgeStoreDriver = 'file' | 'supabase'
 
 const DEFAULT_WEATHER_APP_URL = 'http://localhost:4173'
+const DEFAULT_CHESS_APP_URL = 'http://localhost:4174'
 const DEMO_SCHOOL_ID = 'demo-school'
 const DEMO_CLASS_ID = 'demo-class'
 
@@ -121,6 +122,18 @@ export function getConfiguredWeatherAppUrl(envValue = process.env.CHATBRIDGE_WEA
     return new URL(envValue).toString().replace(/\/$/, '')
   } catch {
     return DEFAULT_WEATHER_APP_URL
+  }
+}
+
+export function getConfiguredChessAppUrl(envValue = process.env.CHATBRIDGE_CHESS_APP_URL) {
+  if (!envValue) {
+    return DEFAULT_CHESS_APP_URL
+  }
+
+  try {
+    return new URL(envValue).toString().replace(/\/$/, '')
+  } catch {
+    return DEFAULT_CHESS_APP_URL
   }
 }
 
@@ -183,7 +196,8 @@ function createSeedData(): BridgeStoreData {
       description: 'Interactive chess board with guided tutoring.',
       developerName: 'ChatBridge Demo',
       executionModel: 'iframe',
-      allowedOrigins: ['https://apps.chatbridge.local'],
+      launchUrl: getConfiguredChessAppUrl(),
+      allowedOrigins: getAllowedOriginsForLaunchUrl(getConfiguredChessAppUrl()),
       authType: 'none',
       subjectTags: ['Strategy', 'Logic'],
       gradeBand: '3-12',
