@@ -45,7 +45,7 @@ vi.mock('@/packages/chatbridge/registry', () => ({
   },
 }))
 
-import { RouteComponent } from './chatbridge'
+import { RouteComponent } from '@/routes/settings/chatbridge'
 
 describe('settings chatbridge route', () => {
   beforeEach(() => {
