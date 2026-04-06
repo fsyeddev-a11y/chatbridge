@@ -23,6 +23,7 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [x] `17` role-based authorization and class membership
 - [x] `18` school hierarchy and scoped governance
 - [x] `19` entitlement-aware runtime class bootstrap
+- [ ] `20` initial message flicker bug (open)
 
 ## Implementation Progress Checklist
 
@@ -110,6 +111,11 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 
 - [16-deployment-and-runtime-optimization.md](/Users/fsyed/Documents/ChatBridge/specs/16-deployment-and-runtime-optimization.md)
   - Defines deployment/build/runtime optimization requirements without changing trust boundaries.
+
+### Known Bugs
+
+- [20-initial-message-flicker-bug.md](/Users/fsyed/Documents/ChatBridge/specs/20-initial-message-flicker-bug.md)
+  - First message in a new session flickers and disappears for Platform Admin and Teacher roles. Race condition between session creation, optimistic cache updates, and backend persistence.
 
 ## Recommended Build Sequence
 
