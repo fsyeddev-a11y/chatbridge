@@ -27,6 +27,7 @@ import {
   enableChatBridgeAppForClass,
   enableChatBridgeAppForSchool,
   fetchDeveloperChatBridgeApps,
+  getChatBridgeSettingsAccess,
   registerChatBridgeApp,
   reviewChatBridgeApp,
   useChatBridgeAllowlist,
@@ -91,26 +92,12 @@ export default function ChatBridgeWorkspace() {
 
   const { data: workspaceUser, error: workspaceUserError, isLoading: workspaceUserLoading } = useChatBridgeMe()
   const effectiveRoles = workspaceUser?.user.roles || []
-  const schoolMemberships = workspaceUser?.schoolMemberships || []
-  const classMemberships = workspaceUser?.classMemberships || workspaceUser?.memberships || []
-  const schoolAdminSchoolIds = useMemo(
-    () =>
-      schoolMemberships
-        .filter((membership) => membership.membershipRole === 'school_admin')
-        .map((membership) => membership.schoolId),
-    [schoolMemberships]
-  )
-  const teacherClassIds = useMemo(
-    () =>
-      classMemberships
-        .filter((membership) => membership.membershipRole === 'teacher')
-        .map((membership) => membership.classId),
-    [classMemberships]
-  )
-  const canUseDeveloperWorkspace = effectiveRoles.includes('developer') || effectiveRoles.includes('admin')
-  const canUseAdminWorkspace = effectiveRoles.includes('admin')
-  const canUseSchoolAdminWorkspace = canUseAdminWorkspace || schoolAdminSchoolIds.length > 0
-  const canUseTeacherWorkspace = canUseAdminWorkspace || teacherClassIds.length > 0
+  const { hasAdminAccess, hasDeveloperAccess, managedSchoolIds: schoolAdminSchoolIds, taughtClassIds: teacherClassIds } =
+    useMemo(() => getChatBridgeSettingsAccess(workspaceUser), [workspaceUser])
+  const canUseDeveloperWorkspace = hasDeveloperAccess
+  const canUseAdminWorkspace = hasAdminAccess
+  const canUseSchoolAdminWorkspace = hasAdminAccess || schoolAdminSchoolIds.length > 0
+  const canUseTeacherWorkspace = hasAdminAccess || teacherClassIds.length > 0
   const scopedBadges = useMemo(() => {
     const badges = new Set<string>()
 
@@ -131,26 +118,26 @@ export default function ChatBridgeWorkspace() {
       return []
     }
 
-    if (canUseAdminWorkspace) {
+    if (hasAdminAccess) {
       return workspaceUser.schools
     }
 
     const allowedSchoolIds = new Set(schoolAdminSchoolIds)
     return workspaceUser.schools.filter((school) => allowedSchoolIds.has(school.schoolId))
-  }, [workspaceUser, canUseAdminWorkspace, schoolAdminSchoolIds])
+  }, [workspaceUser, hasAdminAccess, schoolAdminSchoolIds])
 
   const manageableClasses = useMemo(() => {
     if (!workspaceUser) {
       return []
     }
 
-    if (canUseAdminWorkspace) {
+    if (hasAdminAccess) {
       return workspaceUser.classes
     }
 
     const allowedClassIds = new Set(teacherClassIds)
     return workspaceUser.classes.filter((entry) => allowedClassIds.has(entry.classId))
-  }, [workspaceUser, canUseAdminWorkspace, teacherClassIds])
+  }, [workspaceUser, hasAdminAccess, teacherClassIds])
 
   const selectedClass = useMemo(
     () => manageableClasses.find((entry) => entry.classId === classId),
@@ -180,7 +167,7 @@ export default function ChatBridgeWorkspace() {
     enabled: canUseAdminWorkspace || canUseTeacherWorkspace || canUseSchoolAdminWorkspace,
   })
   const { data: schoolAllowlist = [], error: schoolAllowlistError } = useChatBridgeSchoolAllowlist(effectiveSchoolId, {
-    enabled: canUseSchoolAdminWorkspace || canUseTeacherWorkspace,
+    enabled: (canUseSchoolAdminWorkspace || canUseTeacherWorkspace) && !!effectiveSchoolId,
   })
   const { data: allowlist = [], error: allowlistError } = useChatBridgeAllowlist(classId, {
     enabled: canUseTeacherWorkspace && !!classId,

@@ -22,6 +22,7 @@ import Divider from '@/components/common/Divider'
 import Page from '@/components/layout/Page'
 import { ScalableIcon } from '@/components/common/ScalableIcon'
 import { useProviders } from '@/hooks/useProviders'
+import { getChatBridgeSettingsAccess, useChatBridgeMe } from '@/packages/chatbridge/registry'
 import { useIsSmallScreen } from '@/hooks/useScreenChange'
 import platform from '@/platform'
 import { featureFlags } from '@/utils/feature-flags'
@@ -137,7 +138,10 @@ export function SettingsRoot() {
   const key = routerState.location.pathname.split('/')[2]
   const isSmallScreen = useIsSmallScreen()
   const { providers: availableProviders } = useProviders()
+  const { data: workspaceUser } = useChatBridgeMe()
+  const { canAccessSettings: canAccessChatBridgeSettings } = getChatBridgeSettingsAccess(workspaceUser)
   const isChatboxAIActivated = availableProviders.some((p) => p.id === 'chatbox-ai')
+  const visibleItems = ITEMS.filter((item) => item.key !== 'chatbridge' || canAccessChatBridgeSettings)
 
   return (
     <Flex flex={1} h="100%" miw={isSmallScreen ? undefined : 800}>
@@ -151,7 +155,7 @@ export function SettingsRoot() {
             isSmallScreen ? 'w-full border-r-0' : 'flex-[1_0_auto]'
           )}
         >
-          {ITEMS.map((item) => (
+          {visibleItems.map((item) => (
             <Link
               disabled={
                 routerState.location.pathname === `/settings/${item.key}` ||

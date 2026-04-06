@@ -7,31 +7,72 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ChatBridgeWorkspace from './ChatBridgeWorkspace'
 
 const {
+  useChatBridgeMeMock,
   useChatBridgeAppsMock,
+  useChatBridgeSchoolAllowlistMock,
   useChatBridgeAllowlistMock,
   useChatBridgeReviewActionsMock,
+  useDeveloperChatBridgeAppsMock,
+  useDeveloperChatBridgeReviewActionsMock,
   enableChatBridgeAppForClassMock,
   disableChatBridgeAppForClassMock,
+  enableChatBridgeAppForSchoolMock,
+  disableChatBridgeAppForSchoolMock,
   registerChatBridgeAppMock,
   reviewChatBridgeAppMock,
+  fetchDeveloperChatBridgeAppsMock,
 } = vi.hoisted(() => ({
+  useChatBridgeMeMock: vi.fn(),
   useChatBridgeAppsMock: vi.fn(),
+  useChatBridgeSchoolAllowlistMock: vi.fn(),
   useChatBridgeAllowlistMock: vi.fn(),
   useChatBridgeReviewActionsMock: vi.fn(),
+  useDeveloperChatBridgeAppsMock: vi.fn(),
+  useDeveloperChatBridgeReviewActionsMock: vi.fn(),
   enableChatBridgeAppForClassMock: vi.fn(),
   disableChatBridgeAppForClassMock: vi.fn(),
+  enableChatBridgeAppForSchoolMock: vi.fn(),
+  disableChatBridgeAppForSchoolMock: vi.fn(),
   registerChatBridgeAppMock: vi.fn(),
   reviewChatBridgeAppMock: vi.fn(),
+  fetchDeveloperChatBridgeAppsMock: vi.fn(),
 }))
 
 vi.mock('@/packages/chatbridge/registry', () => ({
+  useChatBridgeMe: useChatBridgeMeMock,
   useChatBridgeApps: useChatBridgeAppsMock,
+  useChatBridgeSchoolAllowlist: useChatBridgeSchoolAllowlistMock,
   useChatBridgeAllowlist: useChatBridgeAllowlistMock,
   useChatBridgeReviewActions: useChatBridgeReviewActionsMock,
+  useDeveloperChatBridgeApps: useDeveloperChatBridgeAppsMock,
+  useDeveloperChatBridgeReviewActions: useDeveloperChatBridgeReviewActionsMock,
   enableChatBridgeAppForClass: enableChatBridgeAppForClassMock,
   disableChatBridgeAppForClass: disableChatBridgeAppForClassMock,
+  enableChatBridgeAppForSchool: enableChatBridgeAppForSchoolMock,
+  disableChatBridgeAppForSchool: disableChatBridgeAppForSchoolMock,
   registerChatBridgeApp: registerChatBridgeAppMock,
   reviewChatBridgeApp: reviewChatBridgeAppMock,
+  fetchDeveloperChatBridgeApps: fetchDeveloperChatBridgeAppsMock,
+  getChatBridgeSettingsAccess: (workspaceUser: any) => {
+    const roles = workspaceUser?.user.roles || []
+    const schoolMemberships = workspaceUser?.schoolMemberships || []
+    const classMemberships = workspaceUser?.classMemberships || workspaceUser?.memberships || []
+    const managedSchoolIds = schoolMemberships
+      .filter((membership: any) => membership.membershipRole === 'school_admin')
+      .map((membership: any) => membership.schoolId)
+    const taughtClassIds = classMemberships
+      .filter((membership: any) => membership.membershipRole === 'teacher')
+      .map((membership: any) => membership.classId)
+
+    return {
+      canAccessSettings:
+        roles.includes('admin') || roles.includes('developer') || managedSchoolIds.length > 0 || taughtClassIds.length > 0,
+      hasAdminAccess: roles.includes('admin'),
+      hasDeveloperAccess: roles.includes('developer'),
+      managedSchoolIds,
+      taughtClassIds,
+    }
+  },
 }))
 
 function renderWorkspace() {
@@ -50,6 +91,43 @@ function renderWorkspace() {
     </MantineProvider>
   )
 }
+
+const appsFixture = [
+  {
+    appId: 'weather',
+    name: 'Weather Dashboard',
+    version: '1.0.0',
+    description: 'Weather tutoring.',
+    developerName: 'ChatBridge Demo',
+    executionModel: 'iframe',
+    allowedOrigins: ['https://weather.example.com'],
+    authType: 'none',
+    subjectTags: ['Science'],
+    gradeBand: 'K-12',
+    llmSafeFields: ['location'],
+    tools: [],
+    reviewState: 'approved',
+    enabledClassIds: [],
+    llmOwnership: 'platform',
+  },
+  {
+    appId: 'story-builder',
+    name: 'AI Story Builder',
+    version: '1.0.0',
+    description: 'Story drafting.',
+    developerName: 'ChatBridge Demo',
+    executionModel: 'iframe',
+    allowedOrigins: ['https://apps.chatbridge.local'],
+    authType: 'none',
+    subjectTags: ['ELA'],
+    gradeBand: '3-8',
+    llmSafeFields: ['storyTitle'],
+    tools: [],
+    reviewState: 'pending',
+    enabledClassIds: [],
+    llmOwnership: 'platform',
+  },
+]
 
 describe('ChatBridgeWorkspace', () => {
   beforeEach(() => {
@@ -76,86 +154,106 @@ describe('ChatBridgeWorkspace', () => {
       writable: true,
       value: ResizeObserverMock,
     })
+
+    useChatBridgeMeMock.mockReturnValue({
+      data: {
+        user: {
+          userId: 'teacher-1',
+          email: 'teacher@example.com',
+          role: 'student',
+          roles: ['student'],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        schools: [
+          {
+            schoolId: 'demo-school',
+            name: 'Demo School',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+        schoolMemberships: [
+          {
+            schoolId: 'demo-school',
+            userId: 'teacher-1',
+            membershipRole: 'teacher',
+            createdAt: 1,
+          },
+        ],
+        classes: [
+          {
+            classId: 'demo-class',
+            schoolId: 'demo-school',
+            name: 'Demo Class',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+        memberships: [
+          {
+            classId: 'demo-class',
+            userId: 'teacher-1',
+            membershipRole: 'teacher',
+            createdAt: 1,
+          },
+        ],
+        classMemberships: [
+          {
+            classId: 'demo-class',
+            userId: 'teacher-1',
+            membershipRole: 'teacher',
+            createdAt: 1,
+          },
+        ],
+      },
+      isLoading: false,
+      error: undefined,
+    })
     useChatBridgeAppsMock.mockReturnValue({
-      data: [
-        {
-          appId: 'weather',
-          name: 'Weather Dashboard',
-          version: '1.0.0',
-          description: 'Weather tutoring.',
-          developerName: 'ChatBridge Demo',
-          executionModel: 'iframe',
-          allowedOrigins: ['https://weather.example.com'],
-          authType: 'none',
-          subjectTags: ['Science'],
-          gradeBand: 'K-12',
-          llmSafeFields: ['location'],
-          tools: [],
-          reviewState: 'approved',
-          enabledClassIds: [],
-          llmOwnership: 'platform',
-        },
-        {
-          appId: 'story-builder',
-          name: 'AI Story Builder',
-          version: '1.0.0',
-          description: 'Story drafting.',
-          developerName: 'ChatBridge Demo',
-          executionModel: 'iframe',
-          allowedOrigins: ['https://apps.chatbridge.local'],
-          authType: 'none',
-          subjectTags: ['ELA'],
-          gradeBand: '3-8',
-          llmSafeFields: ['storyTitle'],
-          tools: [],
-          reviewState: 'pending',
-          enabledClassIds: [],
-          llmOwnership: 'platform',
-        },
-      ],
+      data: appsFixture,
+      error: undefined,
+    })
+    useChatBridgeSchoolAllowlistMock.mockReturnValue({
+      data: [{ schoolId: 'demo-school', appId: 'weather', enabledBy: 'school-admin-1', enabledAt: 1712000000000 }],
+      error: undefined,
     })
     useChatBridgeAllowlistMock.mockReturnValue({
       data: [{ classId: 'demo-class', appId: 'weather', enabledBy: 'teacher-demo', enabledAt: 1712000000000 }],
+      error: undefined,
     })
     useChatBridgeReviewActionsMock.mockReturnValue({
-      data: [
-        {
-          appId: 'weather',
-          version: '1.0.0',
-          action: 'approve',
-          reviewerId: 'platform-admin',
-          timestamp: 1712000000000,
-          notes: 'Approved',
-        },
-      ],
+      data: [],
+      error: undefined,
+    })
+    useDeveloperChatBridgeAppsMock.mockReturnValue({
+      data: [],
+      error: undefined,
+    })
+    useDeveloperChatBridgeReviewActionsMock.mockReturnValue({
+      data: [],
+      error: undefined,
     })
     enableChatBridgeAppForClassMock.mockResolvedValue(undefined)
     disableChatBridgeAppForClassMock.mockResolvedValue(undefined)
+    enableChatBridgeAppForSchoolMock.mockResolvedValue(undefined)
+    disableChatBridgeAppForSchoolMock.mockResolvedValue(undefined)
     registerChatBridgeAppMock.mockResolvedValue(undefined)
     reviewChatBridgeAppMock.mockResolvedValue(undefined)
+    fetchDeveloperChatBridgeAppsMock.mockResolvedValue([])
   })
 
-  it('renders dedicated admin and teacher sections with review history', () => {
+  it('shows only the teacher class allowlist workspace for teachers and includes school-approved state', () => {
     renderWorkspace()
 
-    expect(screen.getByText('ChatBridge Workspace')).toBeTruthy()
-    expect(screen.getByText('Admin Registry Review')).toBeTruthy()
     expect(screen.getByText('Teacher Class Allowlist')).toBeTruthy()
-    expect(screen.getByText('Recent Review History')).toBeTruthy()
-    expect(screen.getAllByText('Weather Dashboard')).toHaveLength(2)
-    expect(screen.getAllByText('AI Story Builder')).toHaveLength(2)
+    expect(screen.queryByText('School App Approval')).toBeNull()
+    expect(screen.queryByText('Admin Registry Review')).toBeNull()
+    expect(screen.queryByText('Developer Portal')).toBeNull()
+    expect(screen.getByText('School Enabled')).toBeTruthy()
   })
 
-  it('filters registry cards by review state', () => {
-    renderWorkspace()
-
-    fireEvent.click(screen.getByRole('radio', { name: 'Pending' }))
-
-    expect(screen.getAllByText('AI Story Builder')).toHaveLength(2)
-    expect(screen.getAllByText('Weather Dashboard')).toHaveLength(1)
-  })
-
-  it('updates the current class allowlist', async () => {
+  it('lets a teacher manage class allowlist using school-approved state', async () => {
     renderWorkspace()
 
     fireEvent.click(screen.getByRole('button', { name: 'Disable for Class' }))
@@ -163,5 +261,78 @@ describe('ChatBridgeWorkspace', () => {
     await waitFor(() => {
       expect(disableChatBridgeAppForClassMock).toHaveBeenCalledWith('demo-class', 'weather', 'teacher-demo')
     })
+  })
+
+  it('does not render ChatBridge controls for students', () => {
+    useChatBridgeMeMock.mockReturnValue({
+      data: {
+        user: {
+          userId: 'student-1',
+          email: 'student@example.com',
+          role: 'student',
+          roles: ['student'],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        schools: [],
+        schoolMemberships: [],
+        classes: [],
+        memberships: [],
+        classMemberships: [],
+      },
+      isLoading: false,
+      error: undefined,
+    })
+
+    renderWorkspace()
+
+    expect(screen.getByText(/does not currently have ChatBridge workspace permissions/i)).toBeTruthy()
+    expect(screen.queryByText('Teacher Class Allowlist')).toBeNull()
+    expect(screen.queryByText('School App Approval')).toBeNull()
+    expect(screen.queryByText('Admin Registry Review')).toBeNull()
+    expect(screen.queryByText('Developer Portal')).toBeNull()
+  })
+
+  it('shows admin, school approval, and teacher allowlist sections for a pure platform admin', () => {
+    useChatBridgeMeMock.mockReturnValue({
+      data: {
+        user: {
+          userId: 'platform-admin-1',
+          email: 'admin@example.com',
+          role: 'admin',
+          roles: ['admin'],
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        schools: [
+          {
+            schoolId: 'demo-school',
+            name: 'Demo School',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+        schoolMemberships: [],
+        classes: [
+          {
+            classId: 'demo-class',
+            schoolId: 'demo-school',
+            name: 'Demo Class',
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+        memberships: [],
+        classMemberships: [],
+      },
+      isLoading: false,
+      error: undefined,
+    })
+
+    renderWorkspace()
+
+    expect(screen.getByText('Admin Registry Review')).toBeTruthy()
+    expect(screen.getByText('School App Approval')).toBeTruthy()
+    expect(screen.getByText('Teacher Class Allowlist')).toBeTruthy()
   })
 })
