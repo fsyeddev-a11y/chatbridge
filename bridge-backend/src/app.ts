@@ -742,6 +742,79 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
   })
 
+  // Proxy endpoint: fetch Google Classroom data using stored OAuth token
+  app.get('/api/oauth/apps/:appId/classroom-data', async (request, reply) => {
+    const { appId } = AppIdParamsSchema.parse(request.params)
+    const userId = getRequestUserId(request)
+    if (!userId) {
+      return reply.status(401).send({ error: 'unauthorized' })
+    }
+
+    const appEntry = await store.getRegistryEntry(appId)
+    if (!appEntry || appEntry.manifest.authType !== 'oauth2' || !appEntry.manifest.oauthProvider) {
+      return reply.status(400).send({ error: 'oauth_not_supported' })
+    }
+
+    const token = await store.getOAuthToken(userId, appId, appEntry.manifest.oauthProvider)
+    if (!token) {
+      return reply.status(401).send({ error: 'not_connected', message: 'OAuth token not found. Please connect first.' })
+    }
+
+    const accessToken = decryptStoredOAuthToken(token.accessToken)
+
+    try {
+      const [coursesRes, courseWorkRes] = await Promise.all([
+        fetch('https://classroom.googleapis.com/v1/courses?courseStates=ACTIVE&pageSize=10', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }),
+        fetch('https://classroom.googleapis.com/v1/courses/-/courseWork?pageSize=20&orderBy=dueDate asc', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }).catch(() => null),
+      ])
+
+      if (!coursesRes.ok) {
+        const body = await coursesRes.text().catch(() => '')
+        return reply.status(coursesRes.status === 401 ? 401 : 502).send({
+          error: 'classroom_api_error',
+          message: `Google Classroom API returned ${coursesRes.status}`,
+          detail: body,
+        })
+      }
+
+      const coursesData = await coursesRes.json() as { courses?: Array<{ id: string; name: string; section?: string; descriptionHeading?: string; courseState: string }> }
+      const courses = (coursesData.courses || []).map((c) => ({
+        id: c.id,
+        name: c.name,
+        section: c.section,
+        heading: c.descriptionHeading,
+      }))
+
+      let assignments: Array<{ id: string; title: string; courseId: string; dueDate?: string; state: string }> = []
+      if (courseWorkRes?.ok) {
+        const cwData = await courseWorkRes.json() as { courseWork?: Array<{ id: string; title: string; courseId: string; dueDate?: { year: number; month: number; day: number }; state: string }> }
+        assignments = (cwData.courseWork || []).map((cw) => ({
+          id: cw.id,
+          title: cw.title,
+          courseId: cw.courseId,
+          dueDate: cw.dueDate ? `${cw.dueDate.year}-${String(cw.dueDate.month).padStart(2, '0')}-${String(cw.dueDate.day).padStart(2, '0')}` : undefined,
+          state: cw.state,
+        }))
+      }
+
+      return {
+        courses,
+        assignments,
+        courseCount: courses.length,
+        assignmentCount: assignments.length,
+      }
+    } catch (err) {
+      return reply.status(502).send({
+        error: 'classroom_api_error',
+        message: err instanceof Error ? err.message : 'Failed to fetch classroom data',
+      })
+    }
+  })
+
   app.get('/api/classes/:classId/apps', async (request, reply) => {
     const { classId } = ClassIdParamsSchema.parse(request.params)
     const denied = await requireClassAccess(request, reply, store, classId)

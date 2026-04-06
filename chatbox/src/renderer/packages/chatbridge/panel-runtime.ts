@@ -27,6 +27,8 @@ export type HostBridgeEnvelope = {
     success?: boolean
     provider?: string
     error?: string
+    apiOrigin?: string
+    authHeaders?: Record<string, string>
   }
 }
 

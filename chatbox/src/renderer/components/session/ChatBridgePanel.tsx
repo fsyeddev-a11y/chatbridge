@@ -1,8 +1,9 @@
 import { Alert, Badge, Button, Card, Group, Stack, Text } from '@mantine/core'
 import type { Session } from '@shared/types'
 import { IconAlertCircle, IconCheck, IconPlayerPause } from '@tabler/icons-react'
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { revokeChatBridgeOAuthToken, startChatBridgeOAuthFlow, useChatBridgeOAuthStatus } from '@/packages/chatbridge/oauth'
+import { getSupabaseAuthHeaders } from '@/packages/supabase'
 import { emitChatBridgeEvent } from '@/packages/chatbridge/observability'
 import {
   getBridgeFailureMessage,
@@ -197,9 +198,17 @@ export default function ChatBridgePanel({ session }: ChatBridgePanelProps) {
 
   const iframeSandbox = getIframeSandboxPolicy(activeApp)
 
-  const sendInitMessage = () => {
+  const sendInitMessage = async () => {
     if (!activeApp) {
       return
+    }
+
+    const apiOrigin = process.env.CHATBRIDGE_API_ORIGIN || 'http://localhost:8787'
+    let authHeaders: Record<string, string> = {}
+    try {
+      authHeaders = await getSupabaseAuthHeaders()
+    } catch {
+      // Best effort
     }
 
     const result = postHostBridgeMessage(iframeRef.current, activeApp, 'INIT', {
@@ -208,6 +217,8 @@ export default function ChatBridgePanel({ session }: ChatBridgePanelProps) {
       locale: navigator.language || 'en-US',
       theme: document.documentElement.getAttribute('data-mantine-color-scheme') === 'dark' ? 'dark' : 'light',
       previousState: activeContext?.lastState,
+      apiOrigin,
+      authHeaders,
     })
 
     if (!result.sent) {
