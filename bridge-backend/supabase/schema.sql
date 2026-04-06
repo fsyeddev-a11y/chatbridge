@@ -136,7 +136,7 @@ create unique index if not exists oauth_tokens_user_app_provider_idx on oauth_to
 create table if not exists user_profiles (
   user_id text primary key,
   email text,
-  role text not null check (role in ('admin', 'teacher', 'student', 'developer')),
+  role text not null check (role in ('admin', 'school_admin', 'teacher', 'student', 'developer')),
   created_at bigint not null,
   updated_at bigint not null
 );
@@ -147,7 +147,7 @@ create index if not exists user_profiles_email_idx on user_profiles(email);
 create table if not exists user_roles (
   id text primary key,
   user_id text not null references user_profiles(user_id) on delete cascade,
-  role text not null check (role in ('admin', 'teacher', 'student', 'developer')),
+  role text not null check (role in ('admin', 'school_admin', 'teacher', 'student', 'developer')),
   assigned_by text,
   assigned_at bigint not null,
   revoked_at bigint

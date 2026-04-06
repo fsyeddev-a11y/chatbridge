@@ -172,11 +172,16 @@ function mergeSessionWithLocalConversation(localSession: Session | null | undefi
   const localMessageIds = getAllSessionMessageIds(localSession)
   const backendMessageIds = getAllSessionMessageIds(backendSession)
   const backendMessagesCoveredByLocal = [...backendMessageIds].every((messageId) => localMessageIds.has(messageId))
+  const localMessagesCoveredByBackend = [...localMessageIds].every((messageId) => backendMessageIds.has(messageId))
 
-  if (!backendMessagesCoveredByLocal || localMessageIds.size <= backendMessageIds.size) {
+  // If backend has messages local doesn't AND local doesn't have messages backend doesn't,
+  // backend is strictly ahead — use it.
+  if (!backendMessagesCoveredByLocal && localMessagesCoveredByBackend) {
     return backendSession
   }
 
+  // If local has messages backend doesn't know about yet (optimistic/in-flight),
+  // keep local messages to avoid flicker.
   return {
     ...backendSession,
     messages: localSession.messages,

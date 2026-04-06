@@ -352,7 +352,7 @@ export async function requireAnyGovernanceWorkspaceAccess(
 export async function requireTeacherForClassOrAdmin(
   request: FastifyRequest,
   reply: FastifyReply,
-  store: Pick<BridgeStore, 'listClassMembershipsForUser'>,
+  store: Pick<BridgeStore, 'listClassMembershipsForUser' | 'listSchoolMembershipsForUser' | 'getClassRecord'>,
   classId: string
 ) {
   const userId = getRequestUserId(request)
@@ -367,19 +367,31 @@ export async function requireTeacherForClassOrAdmin(
   }
 
   const memberships = await store.listClassMembershipsForUser(userId)
-  const hasAccess = memberships.some(
+  const hasTeacherAccess = memberships.some(
     (membership) => membership.classId === classId && membership.membershipRole === 'teacher'
   )
 
-  if (!hasAccess) {
-    return reply.status(403).send({
-      error: 'forbidden',
-      requiredScope: 'teacher_for_class',
-      classId,
-    })
+  if (hasTeacherAccess) {
+    return undefined
   }
 
-  return undefined
+  // School admins can also manage classes in their school
+  const classRecord = await store.getClassRecord(classId)
+  if (classRecord?.schoolId) {
+    const schoolMemberships = await store.listSchoolMembershipsForUser(userId)
+    const hasSchoolAdminAccess = schoolMemberships.some(
+      (membership) => membership.schoolId === classRecord.schoolId && membership.membershipRole === 'school_admin'
+    )
+    if (hasSchoolAdminAccess) {
+      return undefined
+    }
+  }
+
+  return reply.status(403).send({
+    error: 'forbidden',
+    requiredScope: 'teacher_for_class',
+    classId,
+  })
 }
 
 export async function requireClassAccess(

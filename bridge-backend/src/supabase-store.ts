@@ -1314,10 +1314,11 @@ async function bootstrapSeedData(client: SupabaseClient) {
     }
   }
 
-  const missingClassEntries = await getMissingSeedClassEntries(client, seedData.classRecords)
-  if (missingClassEntries.length) {
+  // Always upsert class records so that school_id gets populated even for
+  // classes that were seeded before the school hierarchy was introduced.
+  if (seedData.classRecords.length) {
     const { error: seedClassesError } = await client.from('classes').upsert(
-      missingClassEntries.map((entry) => ({
+      seedData.classRecords.map((entry) => ({
         id: entry.classId,
         name: entry.name,
         organization_id: entry.organizationId ?? null,
@@ -1379,10 +1380,11 @@ async function bootstrapSeedData(client: SupabaseClient) {
     }
   }
 
-  const missingSchoolAllowlistEntries = await getMissingSeedSchoolAllowlistEntries(client, seedData.schoolAllowlist)
-  if (missingSchoolAllowlistEntries.length) {
+  // Always upsert school/class allowlists to ensure they exist even if the
+  // school hierarchy was added after initial seeding.
+  if (seedData.schoolAllowlist.length) {
     const { error: seedSchoolAllowlistError } = await client.from('school_allowlists').upsert(
-      missingSchoolAllowlistEntries.map((entry) => ({
+      seedData.schoolAllowlist.map((entry) => ({
         id: `${entry.schoolId}:${entry.appId}`,
         school_id: entry.schoolId,
         app_id: entry.appId,
@@ -1398,10 +1400,9 @@ async function bootstrapSeedData(client: SupabaseClient) {
     }
   }
 
-  const missingAllowlistEntries = await getMissingSeedAllowlistEntries(client, seedData.classAllowlist)
-  if (missingAllowlistEntries.length) {
+  if (seedData.classAllowlist.length) {
     const { error: seedAllowlistError } = await client.from('class_allowlists').upsert(
-      missingAllowlistEntries.map((entry) => ({
+      seedData.classAllowlist.map((entry) => ({
         id: `${entry.classId}:${entry.appId}`,
         class_id: entry.classId,
         app_id: entry.appId,
