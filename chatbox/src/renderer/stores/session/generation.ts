@@ -312,9 +312,6 @@ export async function generate(
           }
         }
         await modifyMessage(sessionId, targetMsg, true)
-        if (USE_CHATBRIDGE_BACKEND_CHAT) {
-          void refreshSessionFromBackendBestEffort(sessionId)
-        }
         break
       }
       // Picture message generation
@@ -373,9 +370,6 @@ export async function generate(
         finishReason: 'cancel',
       }
       await modifyMessage(sessionId, targetMsg, true)
-      if (USE_CHATBRIDGE_BACKEND_CHAT) {
-        void refreshSessionFromBackendBestEffort(sessionId)
-      }
       return
     }
 
@@ -416,9 +410,6 @@ export async function generate(
       status: [],
     }
     await modifyMessage(sessionId, targetMsg, true)
-    if (USE_CHATBRIDGE_BACKEND_CHAT) {
-      void refreshSessionFromBackendBestEffort(sessionId)
-    }
   }
 }
 

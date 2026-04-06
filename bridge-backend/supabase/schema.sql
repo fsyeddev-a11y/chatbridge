@@ -106,7 +106,7 @@ create table if not exists app_context_snapshots (
   session_id text not null,
   user_id text not null,
   app_id text not null references apps(app_id) on delete cascade,
-  status text not null check (status in ('idle', 'ready', 'active', 'error', 'complete')),
+  status text not null check (status in ('idle', 'ready', 'active', 'error', 'complete', 'closed')),
   summary text,
   last_state jsonb,
   last_error text,
