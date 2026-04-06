@@ -26,8 +26,44 @@ function pickLlmSafeState(entry: AppRegistryEntry, context: BridgeAppContext | u
   )
 }
 
-function buildActiveAppSummary(activeApp: AppRegistryEntry | undefined, bridgeState: SessionBridgeState | undefined) {
+function getMostRecentClosedApp(input: {
+  approvedApps: AppRegistryEntry[]
+  bridgeState?: SessionBridgeState
+}) {
+  const appContext = input.bridgeState?.appContext || {}
+  const closedEntries = Object.values(appContext)
+    .filter((context) => context.status === 'closed')
+    .sort((left, right) => (right.lastEventAt || 0) - (left.lastEventAt || 0))
+
+  for (const entry of closedEntries) {
+    const app = input.approvedApps.find((candidate) => candidate.manifest.appId === entry.appId)
+    if (app) {
+      return {
+        app,
+        context: entry,
+      }
+    }
+  }
+
+  return undefined
+}
+
+function buildActiveAppSummary(
+  activeApp: AppRegistryEntry | undefined,
+  approvedApps: AppRegistryEntry[],
+  bridgeState: SessionBridgeState | undefined
+) {
   if (!bridgeState?.activeAppId || !activeApp) {
+    const mostRecentClosed = getMostRecentClosedApp({
+      approvedApps,
+      bridgeState,
+    })
+    if (mostRecentClosed) {
+      return mostRecentClosed.context.summary
+        ? `${mostRecentClosed.app.manifest.name} was closed by the user. Last safe state: ${mostRecentClosed.context.summary}.`
+        : `${mostRecentClosed.app.manifest.name} was closed by the user.`
+    }
+
     return 'No ChatBridge app is currently active.'
   }
 
@@ -53,6 +89,12 @@ function buildActiveAppSummary(activeApp: AppRegistryEntry | undefined, bridgeSt
       : `${activeApp.manifest.name} completed its task.`
   }
 
+  if (activeContext.status === 'closed') {
+    return activeContext.summary
+      ? `${activeApp.manifest.name} was closed by the user. Last safe state: ${activeContext.summary}.`
+      : `${activeApp.manifest.name} was closed by the user.`
+  }
+
   if (safeStateSummary) {
     return `${activeApp.manifest.name} state: ${safeStateSummary}.`
   }
@@ -68,7 +110,7 @@ export function buildChatBridgeOrchestrationMessage(input: {
   const activeApp = input.bridgeState?.activeAppId
     ? input.approvedApps.find((entry) => entry.manifest.appId === input.bridgeState?.activeAppId)
     : undefined
-  const activeAppSummary = buildActiveAppSummary(activeApp, input.bridgeState)
+  const activeAppSummary = buildActiveAppSummary(activeApp, input.approvedApps, input.bridgeState)
   const approvedAppSummary = input.approvedApps.length
     ? input.approvedApps
         .map((entry) => {

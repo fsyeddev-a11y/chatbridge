@@ -122,7 +122,7 @@ export const BackendChatRequestSchema = z.object({
   messages: z.array(BackendChatMessageSchema).min(1).max(40),
 })
 
-export const BridgeAppRuntimeStatusSchema = z.enum(['idle', 'ready', 'active', 'error', 'complete'])
+export const BridgeAppRuntimeStatusSchema = z.enum(['idle', 'ready', 'active', 'error', 'complete', 'closed'])
 
 export const BridgeAppContextSchema = z.object({
   appId: z.string().min(1).max(100),
@@ -135,7 +135,7 @@ export const BridgeAppContextSchema = z.object({
 
 export const SessionBridgeStateSchema = z.object({
   activeAppId: z.string().max(100).optional(),
-  activeClassId: z.string().max(120).default('demo-class'),
+  activeClassId: z.string().max(120).optional(),
   appContext: z.record(z.string(), BridgeAppContextSchema).default({}),
 })
 

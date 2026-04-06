@@ -95,7 +95,7 @@ export type AuditEvent = {
   metadata?: Record<string, unknown>
 }
 
-export type BridgeAppRuntimeStatus = 'idle' | 'ready' | 'active' | 'error' | 'complete'
+export type BridgeAppRuntimeStatus = 'idle' | 'ready' | 'active' | 'error' | 'complete' | 'closed'
 
 export type BridgeAppContext = {
   appId: string
@@ -108,7 +108,7 @@ export type BridgeAppContext = {
 
 export type SessionBridgeState = {
   activeAppId?: string
-  activeClassId: string
+  activeClassId?: string
   appContext: Record<string, BridgeAppContext>
 }
 
@@ -117,6 +117,16 @@ export type BridgeSessionRecord = {
   userId: string
   bridgeState: SessionBridgeState
   updatedAt: number
+}
+
+export type RuntimeClassContextReason = 'persisted_valid' | 'persisted_invalid' | 'missing' | 'none_available'
+
+export type RuntimeClassContext = {
+  persistedClassId?: string
+  validatedClassId?: string
+  bootstrapCandidateClassIds: string[]
+  recommendedClassId?: string
+  reason: RuntimeClassContextReason
 }
 
 export type OAuthTokenRecord = {
