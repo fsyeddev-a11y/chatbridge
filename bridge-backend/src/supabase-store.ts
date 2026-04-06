@@ -1335,10 +1335,11 @@ async function bootstrapSeedData(client: SupabaseClient) {
     }
   }
 
-  const missingRegistryEntries = await getMissingSeedRegistryEntries(client, seedData.registryEntries)
-  if (missingRegistryEntries.length) {
+  // Always upsert registry entries so manifest changes (e.g. launchUrl from
+  // env vars) are reflected even for apps that were seeded previously.
+  if (seedData.registryEntries.length) {
     const { error: seedAppsError } = await client.from('apps').upsert(
-      missingRegistryEntries.map((entry) => ({
+      seedData.registryEntries.map((entry) => ({
         app_id: entry.manifest.appId,
         review_state: entry.reviewState,
         registered_at: entry.registeredAt,
@@ -1357,10 +1358,9 @@ async function bootstrapSeedData(client: SupabaseClient) {
     }
   }
 
-  const missingVersionEntries = await getMissingSeedVersionEntries(client, seedData.appVersions)
-  if (missingVersionEntries.length) {
+  if (seedData.appVersions.length) {
     const { error: seedVersionsError } = await client.from('app_versions').upsert(
-      missingVersionEntries.map((entry) => ({
+      seedData.appVersions.map((entry) => ({
         id: buildVersionRecordId(entry.appId, entry.version),
         app_id: entry.appId,
         version: entry.version,
