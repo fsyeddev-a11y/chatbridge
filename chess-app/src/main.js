@@ -339,7 +339,7 @@ function restoreFromState(previousState) {
   if (typeof previousState.opponentMode === 'string' && ['human', 'easy', 'medium', 'hard'].includes(previousState.opponentMode)) {
     opponentMode = previousState.opponentMode
   } else {
-    opponentMode = 'human'
+    opponentMode = 'easy'
   }
   aiThinking = false
   game = restoreGameFromState(previousState)

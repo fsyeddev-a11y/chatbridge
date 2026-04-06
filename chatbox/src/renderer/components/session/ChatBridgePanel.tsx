@@ -392,7 +392,7 @@ export default function ChatBridgePanel({ session }: ChatBridgePanelProps) {
               ref={iframeRef}
               title={`${activeApp.name} iframe`}
               key={activeApp.appId}
-              className="h-[280px] w-full bg-white"
+              className="h-[560px] w-full bg-white"
               sandbox={iframeSandbox}
               src={activeApp.launchUrl}
               onLoad={sendInitMessage}
