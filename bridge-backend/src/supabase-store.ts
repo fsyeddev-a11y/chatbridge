@@ -108,7 +108,7 @@ type SupabaseAppContextSnapshotRow = {
   session_id: string
   user_id: string
   app_id: string
-  status: 'idle' | 'ready' | 'active' | 'error' | 'complete'
+  status: SessionBridgeState['appContext'][string]['status']
   summary: string | null
   last_state: Record<string, unknown> | null
   last_error: string | null
