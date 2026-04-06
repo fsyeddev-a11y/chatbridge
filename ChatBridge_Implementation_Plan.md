@@ -22,6 +22,7 @@
 - [ ] Shift more product state from frontend session state to backend-owned persistence
 - [ ] Runtime class validation for backend chat/session access
 - [ ] Teacher-only class activation flow in `Settings -> ChatBridge`
+- [x] Entitlement-aware runtime class bootstrap for missing or invalid `activeClassId` in new and migrated sessions
 
 ### Not Started
 - [ ] Remove demo bootstrap defaults (`demo-school`, `demo-class`) from runtime authorization
@@ -76,6 +77,7 @@ These make ChatBridge a functioning platform rather than a frontend demo.
 - [x] Class-scoped app exposure for validated class reads
 - [ ] Runtime class entitlement validation for chat/session state
 - [ ] Remove demo fallback class selection from runtime
+- [x] Entitlement-aware active-class bootstrap for sessions without persisted class state
 
 7. App lifecycle runtime
 - [x] `INIT`
@@ -116,6 +118,7 @@ These are the next major production-readiness block.
 - [ ] Active app state survives reloads
 - [ ] App context is backend-owned
 - [ ] Session/app reconciliation on reconnect
+- [x] Missing `activeClassId` can recover from real entitled membership without fallback defaults
 
 12. Observability and audit trail
 - [x] Frontend audit events
@@ -153,8 +156,8 @@ Important, but dependent on the backend and persistence layers.
 - [x] Real admin review UI in `Settings -> ChatBridge`
 - [x] School-admin school approval UI in `Settings -> ChatBridge`
 - [x] Teacher allowlist UI outside the session page
-- [ ] Route-level gating so students cannot access `Settings -> ChatBridge`
-- [ ] Fix teacher visibility of school-approved app state
+- [x] Route-level gating so students cannot access `Settings -> ChatBridge`
+- [x] Fix teacher visibility of school-approved app state
 - [ ] App status visibility
 
 17. Developer registration experience
@@ -192,7 +195,7 @@ Important once the core platform path is stable.
 
 1. Enforce runtime class entitlement validation for bridge state and backend chat/tool access
 2. Remove demo bootstrap defaults from runtime authorization and class selection
-3. Fix teacher role flow in `Settings -> ChatBridge` and hide ChatBridge settings from students
+3. Add entitlement-aware class bootstrap for sessions missing persisted `activeClassId`
 4. Close Supabase parity gaps for role-scoped ChatBridge workspace data
 5. OAuth orchestration
 6. Google Classroom integration
@@ -203,9 +206,11 @@ Important once the core platform path is stable.
 
 ### Recommendation
 - [ ] Enforce backend validation of `activeClassId` for bridge-state persistence and backend chat/tool orchestration
+- [ ] Add a separate entitlement-aware session bootstrap flow for missing `activeClassId`
 
 ### Why This Next
 - It closes the largest remaining authorization gap in the role model
 - It makes class-scoped shelf and tool exposure defensible for teachers and students
 - It removes reliance on the demo fallback path that still leaks into runtime behavior
 - It gives the frontend a trustworthy backend contract before more UI work lands
+- It makes migrated sessions recover gracefully without reintroducing unsafe default classes

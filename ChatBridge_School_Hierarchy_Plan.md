@@ -263,6 +263,7 @@ class_app_allowlists
 - conversation
 - app shelf for enrolled classes only
 - no governance controls
+- no access to `Settings -> ChatBridge`
 
 ### Developer
 
@@ -313,5 +314,6 @@ class_app_allowlists
 - A school-enabled app is not visible to students until a teacher enables it for a class they teach.
 - A teacher who teaches multiple classes can enable an app for one class without enabling it for the others.
 - A student only sees apps enabled for classes they are enrolled in.
+- A student can use the runtime shelf but cannot access `Settings -> ChatBridge`.
 - A school admin cannot manage another school’s data.
 - A developer cannot see school or student classroom data by virtue of being a developer.

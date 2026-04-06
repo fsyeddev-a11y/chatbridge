@@ -16,7 +16,8 @@
   - platform approval state
   - role-aware school-admin and teacher controls in the dedicated ChatBridge settings workspace
 - Not implemented yet:
-  - student app exposure derived from school and class membership
+  - removal of demo bootstrap defaults so role scope comes from real school/class membership instead of seeded fallback data
+  - teacher settings flow that can reliably read school-approved state without needing school-admin privileges
   - runtime validation that backend chat/session access only uses classes the user is entitled to
 
 ## Context
@@ -190,12 +191,14 @@ Result:
 - Runtime tool exposure follows the same rule as the shelf.
 - Students cannot use prompt tricks or direct calls to reach non-exposed apps.
 - If school or class approval is revoked, the app disappears from the shelf and toolset on the next turn.
+- Students do not receive ChatBridge governance access through `Settings -> ChatBridge`.
 
 #### Testing
 
 - Integration tests verify student shelf queries only return apps passing all three gates.
 - Integration tests verify backend tool orchestration does not expose apps outside the student’s class scope.
 - Manual test verifies a student in one class does not see a class-enabled app from another class.
+- Manual test verifies a student can use the runtime shelf but cannot access `Settings -> ChatBridge`.
 
 #### Spec
 

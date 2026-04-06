@@ -12,10 +12,11 @@
   - backend-owned bridge app/session state
   - app-context snapshot persistence
   - backend-owned chat session persistence for signed-in web users
+  - explicit durable `closed` app lifecycle state for user-closed app sessions
 - Not implemented yet:
   - richer normalized message storage and server-side search
   - full role-aware session visibility and sharing rules
-  - explicit durable `closed`/`terminated` app lifecycle state
+  - explicit durable `terminated` lifecycle state beyond user-closed sessions
 
 ## Context
 
@@ -176,15 +177,16 @@ frontend opens session
 
 **Why this needs a future spec**
 
-Today, manually closing an app clears `activeAppId`, but it does not create a distinct durable terminal state such as `closed` or `terminated`. That means backend snapshots can correctly show that no app is currently open, while the last stored `appContext.status` may still read as `ready` or `active`. This is acceptable for the current prototype, but it is not expressive enough for long-term audit, recovery, and UX semantics.
+Today, manually closing an app creates a durable `closed` state and clears `activeAppId`, which preserves the difference between a user-closed app and an app that is still active. That closes the largest semantic gap in session persistence, but it is still not expressive enough for full lifecycle and audit semantics because a separate `terminated` state and richer close metadata do not yet exist.
 
 **Future requirements**
 
 - The platform should distinguish:
   - app finished its task (`complete`)
   - app failed (`error`)
-  - app was explicitly closed by the student or teacher (`closed` / `terminated`)
-- Manual close actions should produce durable metadata or status transitions in backend session persistence and app-context snapshots.
+  - app was explicitly closed by the student or teacher (`closed`)
+  - app was forcibly terminated or otherwise ended outside the normal close path (`terminated`)
+- Manual close actions should continue to produce durable backend-visible `closed` state and may later gain richer metadata.
 - LLM-visible summaries should be able to tell the difference between:
   - "the app completed"
   - "the app is unavailable"

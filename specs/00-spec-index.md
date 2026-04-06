@@ -22,6 +22,7 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [x] `16` deployment and runtime optimization
 - [x] `17` role-based authorization and class membership
 - [x] `18` school hierarchy and scoped governance
+- [x] `19` entitlement-aware runtime class bootstrap
 
 ## Implementation Progress Checklist
 
@@ -43,6 +44,7 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 - [x] `18` Class-level activation constrained by school approval
 - [x] `18` School-admin and teacher scoped settings workspace
 - [ ] `18` Student shelf and tool exposure derived from school + class scope
+- [ ] `19` Entitlement-aware runtime class bootstrap for missing or invalid `activeClassId`
 - [x] `12` Dedicated teacher/admin surfaces
 - [x] `03` OAuth connect/status/revoke foundation
 - [ ] `13` Additional real apps beyond Weather
@@ -87,6 +89,8 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
   - Defines multi-role authorization, school/class membership, and route enforcement beyond basic auth.
 - [18-school-hierarchy-and-scoped-governance.md](/Users/fsyed/Documents/ChatBridge/specs/18-school-hierarchy-and-scoped-governance.md)
   - Defines the school boundary, school-admin scope, teacher class activation, and student app visibility chain.
+- [19-entitlement-aware-runtime-class-bootstrap.md](/Users/fsyed/Documents/ChatBridge/specs/19-entitlement-aware-runtime-class-bootstrap.md)
+  - Defines how sessions recover a valid runtime class from real entitlement when persisted class state is missing or invalid.
 
 ### Governance, Product Surfaces, and Ecosystem
 
@@ -113,13 +117,14 @@ This index tracks the full ChatBridge spec set, grouped by dependency order rath
 2. Durable persistence and app sessions
 3. Role-based authorization and class membership
 4. School hierarchy and scoped governance
-5. Backend-owned generation
-6. Rate limiting and abuse controls
-7. Teacher/admin surfaces
-8. OAuth orchestration
-9. Real app integrations beyond Weather
-10. Developer registration portal
-11. Deployment/runtime optimization
+5. Entitlement-aware runtime class bootstrap
+6. Backend-owned generation
+7. Rate limiting and abuse controls
+8. Teacher/admin surfaces
+9. OAuth orchestration
+10. Real app integrations beyond Weather
+11. Developer registration portal
+12. Deployment/runtime optimization
 
 ## Notes
 

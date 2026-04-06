@@ -8,12 +8,13 @@
 ## Status
 
 - Implemented now:
-  - dedicated ChatBridge workspace in Settings for registration, review, allowlisting, and review history
-  - session page link-out to the canonical ChatBridge workspace
+  - dedicated ChatBridge workspace in Settings for developer registration, platform review, school approval, class allowlisting, and review history
+  - session page runtime surfaces limited to the ChatBridge shelf and active app panel
 - Not implemented yet:
-  - role-backed navigation and access control in production UI
-  - school-admin school-scoped surfaces
-  - class-scoped teacher views based on real class memberships
+  - role-backed navigation and route access control in production UI
+  - hiding `Settings -> ChatBridge` from students
+  - a working teacher-only class activation flow based on backend-readable school approval state
+  - status parity and test coverage for the new role-scoped workspace
 
 ## Context
 
@@ -35,6 +36,7 @@ The current runtime no longer needs a full governance control plane embedded ins
 - Admins can filter apps by review state.
 - Admins can approve, suspend, reject, or inspect app submissions.
 - Review actions create durable review-history records.
+- Non-admin users do not see or control platform review actions.
 
 #### Testing
 
@@ -67,6 +69,7 @@ suspend/reject/approve actions
 - School admins can enable/disable apps for their school.
 - Teachers only see school-enabled apps as candidates for class activation.
 - School admins cannot mutate another school’s governance state.
+- School admins do not see unrelated teacher, developer, or platform-admin controls unless they separately hold those roles.
 
 #### Testing
 
@@ -101,6 +104,7 @@ last change attribution
 - Teachers cannot enable suspended or unapproved apps.
 - Teachers cannot enable apps for classes they do not teach.
 - Teachers cannot enable apps that the school has not approved.
+- Teachers do not need school-admin privileges to understand which apps are school-approved for their taught classes.
 
 #### Testing
 
@@ -172,6 +176,26 @@ small link or hint to the canonical ChatBridge settings workspace
 **Design rule:**
 - Session UX is runtime-first.
 - Governance UX is settings-first.
+
+---
+
+### US-12.6: Students do not have access to Settings -> ChatBridge
+
+**As a** student,  
+**I want** TutorMeAI to hide governance settings that are not relevant to me,  
+**so that** I only see the runtime ChatBridge shelf during tutoring and not the control plane.
+
+#### Acceptance Criteria
+
+- Students do not see `Settings -> ChatBridge` in navigation.
+- Direct navigation to `/settings/chatbridge` is blocked or redirected for students.
+- Students still retain access to the runtime ChatBridge shelf and active app panel when their class is entitled to apps.
+- Student accounts do not see school-admin, teacher, developer, or platform-admin governance controls.
+
+#### Testing
+
+- Manual test confirms a student account can use class-approved apps in session but cannot open `Settings -> ChatBridge`.
+- Integration or UI tests verify teacher, school-admin, developer, and platform-admin accounts still reach their permitted ChatBridge settings surfaces.
 
 ## Out of Scope
 

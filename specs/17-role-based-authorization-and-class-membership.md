@@ -17,10 +17,13 @@
   - centralized backend role checks for privileged routes
   - school-admin route enforcement for school allowlists
   - teacher-for-class route enforcement for class allowlists
+  - role-scoped ChatBridge workspace sections in `Settings -> ChatBridge`
 - Not implemented yet:
   - runtime class membership validation for backend chat/session access
   - runtime class membership validation for app/session access
+  - removal of demo bootstrap defaults from authorization and runtime class selection
   - role-aware frontend navigation and feature visibility
+  - blocking students from `Settings -> ChatBridge`
   - admin tooling for role assignment and school/class membership management
 
 ## Context
@@ -183,6 +186,7 @@ teacher
 
 student
   may read and use only enrolled classes in their schools
+  may not access `Settings -> ChatBridge`
 
 developer
   has no school or class governance rights by role alone
@@ -274,6 +278,7 @@ requireStudentOrTeacherClassAccess(classId)
 
 - `GET /api/me` exposes enough role information for frontend gating.
 - Students do not see admin or teacher governance controls.
+- Students do not see or access `Settings -> ChatBridge`.
 - School admins see only school-scoped controls for schools they belong to.
 - Teachers see only class-scoped controls for classes they teach.
 - Developers see only developer-owned portal functions.
