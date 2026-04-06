@@ -34,9 +34,39 @@ function pickLlmSafeState(app: ChatBridgeAppDefinition, session: Session) {
   )
 }
 
-function buildActiveAppSummary(session: Session, app: ChatBridgeAppDefinition | undefined) {
+function getMostRecentClosedApp(session: Session, approvedApps: ChatBridgeAppDefinition[]) {
+  const bridgeState = getSessionBridgeState(session)
+  const closedEntries = Object.values(bridgeState.appContext)
+    .filter((context) => context.status === 'closed')
+    .sort((left, right) => (right.lastEventAt || 0) - (left.lastEventAt || 0))
+
+  for (const entry of closedEntries) {
+    const app = approvedApps.find((candidate) => candidate.appId === entry.appId)
+    if (app) {
+      return {
+        app,
+        context: entry,
+      }
+    }
+  }
+
+  return undefined
+}
+
+function buildActiveAppSummary(
+  session: Session,
+  approvedApps: ChatBridgeAppDefinition[],
+  app: ChatBridgeAppDefinition | undefined
+) {
   const bridgeState = getSessionBridgeState(session)
   if (!bridgeState.activeAppId || !app) {
+    const mostRecentClosed = getMostRecentClosedApp(session, approvedApps)
+    if (mostRecentClosed) {
+      return mostRecentClosed.context.summary
+        ? `${mostRecentClosed.app.name} was closed by the user. Last known state: ${mostRecentClosed.context.summary}`
+        : `${mostRecentClosed.app.name} was closed by the user.`
+    }
+
     return 'No ChatBridge app is active yet.'
   }
 
@@ -65,6 +95,12 @@ function buildActiveAppSummary(session: Session, app: ChatBridgeAppDefinition | 
       : `${app.name} has completed its task.`
   }
 
+  if (activeContext.status === 'closed') {
+    return lastKnownState
+      ? `${app.name} was closed by the user. Last known state: ${lastKnownState}`
+      : `${app.name} was closed by the user.`
+  }
+
   return (
     activeContext.summary ||
     app.llmSummaryTemplate ||
@@ -77,7 +113,7 @@ function buildChatBridgeToolDescription(app: ChatBridgeAppDefinition, toolDescri
   return `${toolDescription} Launches or resumes the "${app.name}" ChatBridge app inside TutorMeAI. ${authNote}`.trim()
 }
 
-function buildToolResult(app: ChatBridgeAppDefinition, toolName: string, session: Session) {
+function buildToolResult(app: ChatBridgeAppDefinition, toolName: string, session: Session, classId: string) {
   const bridgeState = getSessionBridgeState(session)
   const existingContext = bridgeState.appContext[app.appId]
 
@@ -93,7 +129,7 @@ function buildToolResult(app: ChatBridgeAppDefinition, toolName: string, session
     authType: app.authType,
     requiresAuthorization: app.authType === 'oauth2',
     summary,
-    activeClassId: bridgeState.activeClassId,
+    activeClassId: classId,
   }
 }
 
@@ -113,8 +149,13 @@ function buildTool(
         throw new Error(`Session ${sessionId} not found`)
       }
 
+      const classId = getSessionBridgeState(session).activeClassId
+      if (!classId) {
+        throw new Error('ChatBridge tool execution requires an active entitled class.')
+      }
+
       await activateBridgeApp(sessionId, app.appId)
-      const result = buildToolResult(app, toolName, session)
+      const result = buildToolResult(app, toolName, session, classId)
       await updateBridgeAppContext(sessionId, app.appId, {
         status: app.authType === 'oauth2' ? 'idle' : 'active',
         summary: result.summary,
@@ -149,7 +190,17 @@ export async function getChatBridgeToolSet(
   }
 
   const bridgeState = getSessionBridgeState(session)
-  const approvedApps = await fetchApprovedChatBridgeAppsForClass(bridgeState.activeClassId)
+  if (!bridgeState.activeClassId) {
+    return null
+  }
+
+  let approvedApps: ChatBridgeAppDefinition[]
+  try {
+    approvedApps = await fetchApprovedChatBridgeAppsForClass(bridgeState.activeClassId)
+  } catch {
+    return null
+  }
+
   if (!approvedApps.length) {
     return null
   }
@@ -165,7 +216,7 @@ export async function getChatBridgeToolSet(
   }
 
   const activeApp = await fetchChatBridgeAppById(bridgeState.activeAppId)
-  const activeSummary = buildActiveAppSummary(session, activeApp)
+  const activeSummary = buildActiveAppSummary(session, approvedApps, activeApp)
 
   const appDescriptions = approvedApps
     .map((app) => {

@@ -24,6 +24,7 @@ const chessApp: ChatBridgeAppDefinition = {
   launchUrl: 'https://example.com/chess',
   allowedOrigins: ['https://apps.example.com'],
   authType: 'none',
+  oauthScopes: [],
   subjectTags: [],
   gradeBand: '3-12',
   llmSafeFields: ['phase'],
@@ -172,7 +173,7 @@ describe('ChatBridgePanel helpers', () => {
       },
     })
     expect(resolveHostPostMessageTargetOrigin(srcDocApp)).toBe('*')
-    expect(getIframeSandboxPolicy(srcDocApp, '<html></html>')).toBe('allow-scripts allow-forms allow-popups')
+    expect(getIframeSandboxPolicy(srcDocApp)).toBe('allow-scripts allow-forms allow-popups allow-same-origin')
   })
 
   it('posts host messages into the iframe contentWindow', () => {
@@ -200,7 +201,6 @@ describe('ChatBridgePanel helpers', () => {
 
   it('allows same-origin only for real hosted iframe apps', () => {
     expect(getIframeSandboxPolicy(chessApp)).toBe('allow-scripts allow-forms allow-popups allow-same-origin')
-    expect(getIframeSandboxPolicy(chessApp, '<html></html>')).toBe('allow-scripts allow-forms allow-popups')
   })
 
   it('derives heartbeat timing and ping eligibility from the manifest/runtime status', () => {

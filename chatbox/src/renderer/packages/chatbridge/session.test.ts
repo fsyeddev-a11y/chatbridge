@@ -137,6 +137,238 @@ describe('ChatBridge session helpers', () => {
     expect(updated.bridgeState?.appContext.weather.summary).toBe('Chicago is 72F and sunny.')
   })
 
+  it('bootstraps an entitled class when hydrated bridge state is missing activeClassId', async () => {
+    getSessionMock.mockResolvedValue({
+      id: 'session-1',
+      name: 'Bridge Session',
+      messages: [],
+      bridgeState: {
+        appContext: {},
+      },
+    } satisfies Session)
+
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.endsWith('/api/sessions/session-1/bridge-state') && !options?.method) {
+        return {
+          ok: true,
+          json: async () => ({
+            sessionId: 'session-1',
+            bridgeState: {
+              appContext: {},
+            },
+            runtimeClassContext: {
+              bootstrapCandidateClassIds: ['class-a', 'class-b'],
+              recommendedClassId: 'class-a',
+              reason: 'missing',
+            },
+          }),
+        }
+      }
+
+      if (url.endsWith('/api/sessions/session-1/bridge-state') && options?.method === 'PUT') {
+        return {
+          ok: true,
+          json: async () => ({
+            sessionId: 'session-1',
+            bridgeState: {
+              activeClassId: 'class-a',
+              appContext: {},
+            },
+          }),
+        }
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`)
+    })
+
+    const result = await hydrateBridgeStateFromBackend('session-1')
+
+    expect(result?.activeClassId).toBe('class-a')
+    expect(fetchMock).not.toHaveBeenCalledWith('http://localhost:8787/api/me', expect.anything())
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8787/api/sessions/session-1/bridge-state',
+      expect.objectContaining({
+        method: 'PUT',
+      })
+    )
+    const persistCall = fetchMock.mock.calls.find(
+      ([url, options]) => url === 'http://localhost:8787/api/sessions/session-1/bridge-state' && options?.method === 'PUT'
+    )
+    expect(persistCall).toBeTruthy()
+    expect(JSON.parse(String(persistCall?.[1]?.body))).toEqual({
+      bridgeState: {
+        activeClassId: 'class-a',
+        appContext: {},
+      },
+    })
+  })
+
+  it('leaves bridge state unset when no entitled bootstrap class exists', async () => {
+    getSessionMock.mockResolvedValue({
+      id: 'session-1',
+      name: 'Bridge Session',
+      messages: [],
+      bridgeState: {
+        appContext: {},
+      },
+    } satisfies Session)
+
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.endsWith('/api/sessions/session-1/bridge-state') && !options?.method) {
+        return {
+          ok: true,
+          json: async () => ({
+            sessionId: 'session-1',
+            bridgeState: {
+              appContext: {},
+            },
+            runtimeClassContext: {
+              bootstrapCandidateClassIds: [],
+              reason: 'none_available',
+            },
+          }),
+        }
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`)
+    })
+
+    const result = await hydrateBridgeStateFromBackend('session-1')
+
+    expect(result?.activeClassId).toBeUndefined()
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'http://localhost:8787/api/sessions/session-1/bridge-state',
+      expect.objectContaining({
+        method: 'PUT',
+      })
+    )
+  })
+
+  it('replaces a stale local activeClassId with a real entitled class when no backend bridge state exists', async () => {
+    getSessionMock.mockResolvedValue({
+      id: 'session-1',
+      name: 'Bridge Session',
+      messages: [],
+      bridgeState: {
+        activeClassId: 'stale-class',
+        activeAppId: 'weather',
+        appContext: {
+          weather: {
+            appId: 'weather',
+            status: 'active',
+            summary: 'Stale local state',
+          },
+        },
+      },
+    } satisfies Session)
+
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.endsWith('/api/sessions/session-1/bridge-state') && !options?.method) {
+        return {
+          ok: true,
+          json: async () => ({
+            sessionId: 'session-1',
+            runtimeClassContext: {
+              persistedClassId: 'stale-class',
+              bootstrapCandidateClassIds: ['class-a'],
+              recommendedClassId: 'class-a',
+              reason: 'persisted_invalid',
+            },
+          }),
+        }
+      }
+
+      if (url.endsWith('/api/sessions/session-1/bridge-state') && options?.method === 'PUT') {
+        return {
+          ok: true,
+          json: async () => ({
+            sessionId: 'session-1',
+            bridgeState: {
+              activeClassId: 'class-a',
+              activeAppId: undefined,
+              appContext: {
+                weather: {
+                  appId: 'weather',
+                  status: 'active',
+                  summary: 'Stale local state',
+                },
+              },
+            },
+          }),
+        }
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`)
+    })
+
+    const result = await hydrateBridgeStateFromBackend('session-1')
+
+    expect(result?.activeClassId).toBe('class-a')
+    expect(result?.activeAppId).toBeUndefined()
+  })
+
+  it('clears a stale local activeClassId when no entitled replacement exists', async () => {
+    getSessionMock.mockResolvedValue({
+      id: 'session-1',
+      name: 'Bridge Session',
+      messages: [],
+      bridgeState: {
+        activeClassId: 'stale-class',
+        activeAppId: 'weather',
+        appContext: {
+          weather: {
+            appId: 'weather',
+            status: 'active',
+            summary: 'Stale local state',
+          },
+        },
+      },
+    } satisfies Session)
+
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.endsWith('/api/sessions/session-1/bridge-state') && !options?.method) {
+        return {
+          ok: true,
+          json: async () => ({
+            sessionId: 'session-1',
+            runtimeClassContext: {
+              persistedClassId: 'stale-class',
+              bootstrapCandidateClassIds: [],
+              reason: 'none_available',
+            },
+          }),
+        }
+      }
+
+      if (url.endsWith('/api/sessions/session-1/bridge-state') && options?.method === 'PUT') {
+        return {
+          ok: true,
+          json: async () => ({
+            sessionId: 'session-1',
+            bridgeState: {
+              activeClassId: undefined,
+              activeAppId: undefined,
+              appContext: {
+                weather: {
+                  appId: 'weather',
+                  status: 'active',
+                  summary: 'Stale local state',
+                },
+              },
+            },
+          }),
+        }
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`)
+    })
+
+    const result = await hydrateBridgeStateFromBackend('session-1')
+
+    expect(result?.activeClassId).toBeUndefined()
+    expect(result?.activeAppId).toBeUndefined()
+  })
+
   it('adopts backend-returned canonical bridge state after activation', async () => {
     updateSessionCacheMock.mockImplementation(async (_sessionId, updater) =>
       updater({
@@ -222,7 +454,7 @@ describe('ChatBridge session helpers', () => {
             appContext: {
               weather: {
                 appId: 'weather',
-                status: 'complete',
+                status: 'closed',
                 summary: 'Canonical backend summary',
               },
             },
@@ -239,6 +471,7 @@ describe('ChatBridge session helpers', () => {
     expect(updated.bridgeState?.appContext.weather.status).toBe('complete')
     expect(updated.bridgeState?.appContext.weather.summary).toBe('Canonical backend summary')
     expect(closed.bridgeState?.activeAppId).toBeUndefined()
+    expect(closed.bridgeState?.appContext.weather.status).toBe('closed')
     expect(closed.bridgeState?.appContext.weather.summary).toBe('Canonical backend summary')
   })
 })

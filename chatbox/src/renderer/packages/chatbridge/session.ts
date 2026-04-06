@@ -2,13 +2,19 @@ import type { BridgeAppContext, Session, SessionBridgeState } from '@shared/type
 import { getSupabaseAuthHeaders } from '@/packages/supabase'
 import * as chatStore from '@/stores/chatStore'
 
-export const DEFAULT_CHATBRIDGE_CLASS_ID = 'demo-class'
 const CHATBRIDGE_API_ORIGIN = process.env.CHATBRIDGE_API_ORIGIN || 'http://localhost:8787'
 
 type BridgeSessionApiResponse = {
   sessionId: string
   bridgeState?: SessionBridgeState
   updatedAt?: number
+  runtimeClassContext?: {
+    persistedClassId?: string
+    validatedClassId?: string
+    bootstrapCandidateClassIds: string[]
+    recommendedClassId?: string
+    reason: 'persisted_valid' | 'persisted_invalid' | 'missing' | 'none_available'
+  }
 }
 
 function normalizeBridgeState(bridgeState: SessionBridgeState | undefined): SessionBridgeState | undefined {
@@ -18,7 +24,7 @@ function normalizeBridgeState(bridgeState: SessionBridgeState | undefined): Sess
 
   return {
     ...bridgeState,
-    activeClassId: bridgeState.activeClassId || DEFAULT_CHATBRIDGE_CLASS_ID,
+    activeClassId: bridgeState.activeClassId,
     appContext: bridgeState.appContext || {},
   }
 }
@@ -26,8 +32,41 @@ function normalizeBridgeState(bridgeState: SessionBridgeState | undefined): Sess
 export function getSessionBridgeState(session: Session): SessionBridgeState {
   return {
     ...session.bridgeState,
-    activeClassId: session.bridgeState?.activeClassId || DEFAULT_CHATBRIDGE_CLASS_ID,
+    activeClassId: session.bridgeState?.activeClassId,
     appContext: session.bridgeState?.appContext || {},
+  }
+}
+
+function resolveBridgeStateFromRuntimeContext(
+  bridgeState: SessionBridgeState,
+  runtimeClassContext: BridgeSessionApiResponse['runtimeClassContext']
+): SessionBridgeState {
+  if (!runtimeClassContext) {
+    return bridgeState
+  }
+
+  if (runtimeClassContext.validatedClassId) {
+    return {
+      ...bridgeState,
+      activeClassId: runtimeClassContext.validatedClassId,
+      appContext: bridgeState.appContext || {},
+    }
+  }
+
+  if (runtimeClassContext.recommendedClassId) {
+    return {
+      ...bridgeState,
+      activeClassId: runtimeClassContext.recommendedClassId,
+      activeAppId: undefined,
+      appContext: bridgeState.appContext || {},
+    }
+  }
+
+  return {
+    ...bridgeState,
+    activeClassId: undefined,
+    activeAppId: undefined,
+    appContext: bridgeState.appContext || {},
   }
 }
 
@@ -96,26 +135,24 @@ export async function hydrateBridgeStateFromBackend(sessionId: string) {
   try {
     const response = await fetchBridgeSessionStateFromBackend(sessionId)
     const backendBridgeState = response.bridgeState
-    if (!backendBridgeState) {
-      return undefined
-    }
-
-    const normalized = normalizeBridgeState(backendBridgeState)
-    if (!normalized) {
-      return undefined
-    }
+    const normalized = normalizeBridgeState(backendBridgeState) || getSessionBridgeState(session)
+    const nextBridgeState = resolveBridgeStateFromRuntimeContext(normalized, response.runtimeClassContext)
 
     const current = getSessionBridgeState(session)
-    if (JSON.stringify(current) === JSON.stringify(normalized)) {
-      return normalized
+    if (JSON.stringify(current) === JSON.stringify(nextBridgeState)) {
+      return nextBridgeState
     }
 
     await chatStore.updateSessionCache(sessionId, (currentSession) => ({
       ...currentSession,
-      bridgeState: normalized,
+      bridgeState: nextBridgeState,
     }))
 
-    return normalized
+    if (JSON.stringify(normalized) !== JSON.stringify(nextBridgeState)) {
+      await syncBridgeStateToBackend(sessionId, nextBridgeState)
+    }
+
+    return nextBridgeState
   } catch (error) {
     console.warn('Failed to hydrate ChatBridge session state', error)
     return undefined
@@ -126,7 +163,7 @@ export async function activateBridgeApp(sessionId: string, appId: string) {
   const nextSession = await chatStore.updateSessionCache(sessionId, (session) => {
     const bridgeState = getSessionBridgeState(session)
     const existing = bridgeState.appContext[appId]
-    return {
+    const updatedSession: Session = {
       ...session,
       bridgeState: {
         ...bridgeState,
@@ -144,6 +181,7 @@ export async function activateBridgeApp(sessionId: string, appId: string) {
         },
       },
     }
+    return updatedSession
   })
 
   const canonicalBridgeState = await syncBridgeStateToBackend(sessionId, getSessionBridgeState(nextSession))
@@ -160,13 +198,28 @@ export async function activateBridgeApp(sessionId: string, appId: string) {
 export async function closeBridgeApp(sessionId: string) {
   const nextSession = await chatStore.updateSessionCache(sessionId, (session) => {
     const bridgeState = getSessionBridgeState(session)
-    return {
+    const activeAppId = bridgeState.activeAppId
+    const activeContext = activeAppId ? bridgeState.appContext[activeAppId] : undefined
+    const updatedSession: Session = {
       ...session,
       bridgeState: {
         ...bridgeState,
         activeAppId: undefined,
+        appContext:
+          activeAppId && activeContext
+            ? {
+                ...bridgeState.appContext,
+                [activeAppId]: {
+                  ...activeContext,
+                  status: 'closed',
+                  lastEventAt: Date.now(),
+                  lastError: undefined,
+                },
+              }
+            : bridgeState.appContext,
       },
     }
+    return updatedSession
   })
 
   const canonicalBridgeState = await syncBridgeStateToBackend(sessionId, getSessionBridgeState(nextSession))
@@ -184,7 +237,7 @@ export async function updateBridgeAppContext(sessionId: string, appId: string, n
   const nextSession = await chatStore.updateSessionCache(sessionId, (session) => {
     const bridgeState = getSessionBridgeState(session)
     const previous = bridgeState.appContext[appId]
-    return {
+    const updatedSession: Session = {
       ...session,
       bridgeState: {
         ...bridgeState,
@@ -192,15 +245,16 @@ export async function updateBridgeAppContext(sessionId: string, appId: string, n
         appContext: {
           ...bridgeState.appContext,
           [appId]: {
-            appId,
-            status: 'idle',
             ...previous,
+            appId,
+            status: previous?.status || 'idle',
             ...nextState,
             lastEventAt: nextState.lastEventAt || Date.now(),
           },
         },
       },
     }
+    return updatedSession
   })
 
   const canonicalBridgeState = await syncBridgeStateToBackend(sessionId, getSessionBridgeState(nextSession))

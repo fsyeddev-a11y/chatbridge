@@ -138,6 +138,14 @@ export type ChatBridgeWorkspaceUser = {
   }>
 }
 
+export type ChatBridgeSettingsAccess = {
+  canAccessSettings: boolean
+  hasAdminAccess: boolean
+  hasDeveloperAccess: boolean
+  managedSchoolIds: string[]
+  taughtClassIds: string[]
+}
+
 const CHATBRIDGE_API_ORIGIN = process.env.CHATBRIDGE_API_ORIGIN || 'http://localhost:8787'
 const CHATBRIDGE_WEATHER_APP_URL = process.env.CHATBRIDGE_WEATHER_APP_URL || 'http://localhost:4173'
 const CHATBRIDGE_WEATHER_APP_ORIGIN = (() => {
@@ -184,6 +192,30 @@ function normalizeRegistryEntries(entries: RegistryApiResponse['apps']): ChatBri
       pendingVersion: entry.pendingVersion,
     })
   )
+}
+
+export function getChatBridgeSettingsAccess(workspaceUser: ChatBridgeWorkspaceUser | undefined): ChatBridgeSettingsAccess {
+  const effectiveRoles = workspaceUser?.user.roles || []
+  const schoolMemberships = workspaceUser?.schoolMemberships || []
+  const classMemberships = workspaceUser?.classMemberships || workspaceUser?.memberships || []
+  const managedSchoolIds = schoolMemberships
+    .filter((membership) => membership.membershipRole === 'school_admin')
+    .map((membership) => membership.schoolId)
+  const taughtClassIds = classMemberships
+    .filter((membership) => membership.membershipRole === 'teacher')
+    .map((membership) => membership.classId)
+
+  return {
+    canAccessSettings:
+      effectiveRoles.includes('admin') ||
+      effectiveRoles.includes('developer') ||
+      managedSchoolIds.length > 0 ||
+      taughtClassIds.length > 0,
+    hasAdminAccess: effectiveRoles.includes('admin'),
+    hasDeveloperAccess: effectiveRoles.includes('developer'),
+    managedSchoolIds,
+    taughtClassIds,
+  }
 }
 
 async function fetchJson<T>(path: string): Promise<T> {

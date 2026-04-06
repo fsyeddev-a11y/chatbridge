@@ -248,7 +248,7 @@ export const SessionThreadSchema = z.object({
 
 export const BridgeAppAuthTypeSchema = z.enum(['none', 'api-key', 'oauth2'])
 
-export const BridgeAppRuntimeStatusSchema = z.enum(['idle', 'ready', 'active', 'error', 'complete'])
+export const BridgeAppRuntimeStatusSchema = z.enum(['idle', 'ready', 'active', 'error', 'complete', 'closed'])
 
 export const BridgeToolManifestSchema = z.object({
   name: z.string(),
@@ -288,7 +288,7 @@ export const BridgeAppContextSchema = z.object({
 
 export const SessionBridgeStateSchema = z.object({
   activeAppId: z.string().optional(),
-  activeClassId: z.string().default('demo-class'),
+  activeClassId: z.string().optional(),
   appContext: z.record(z.string(), BridgeAppContextSchema).default({}),
 })
 

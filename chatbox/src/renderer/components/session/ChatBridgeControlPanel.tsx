@@ -26,7 +26,9 @@ export default function ChatBridgeControlPanel({ session }: ChatBridgeControlPan
   const bridgeState = useMemo(() => getSessionBridgeState(session), [session])
   const classId = bridgeState.activeClassId
   const { data: apps = [] } = useChatBridgeApps()
-  const { data: allowlist = [] } = useChatBridgeAllowlist(classId)
+  const { data: allowlist = [] } = useChatBridgeAllowlist(classId || '', {
+    enabled: !!classId,
+  })
   const [expanded, setExpanded] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string>()
   const [errorMessage, setErrorMessage] = useState<string>()
@@ -74,7 +76,9 @@ export default function ChatBridgeControlPanel({ session }: ChatBridgeControlPan
 
   const allowlistMutation = useMutation({
     mutationFn: (input: { appId: string; enabled: boolean; appName: string }) =>
-      (input.enabled
+      (!classId
+        ? Promise.reject(new Error('No active class selected.'))
+        : input.enabled
         ? enableChatBridgeAppForClass(classId, input.appId, DEFAULT_TEACHER_ID)
         : disableChatBridgeAppForClass(classId, input.appId, DEFAULT_TEACHER_ID)
       ).then(() => input),
@@ -115,9 +119,11 @@ export default function ChatBridgeControlPanel({ session }: ChatBridgeControlPan
               </Text>
             </div>
           </Group>
-          <Badge size="sm" variant="light">
-            {classId}
-          </Badge>
+          {classId ? (
+            <Badge size="sm" variant="light">
+              {classId}
+            </Badge>
+          ) : null}
         </Group>
 
         {statusMessage ? (

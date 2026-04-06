@@ -101,4 +101,22 @@ describe('ChatBridgeShelf', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Expand ChatBridge app shelf' }))
     expect(screen.getByText('Weather Dashboard')).toBeTruthy()
   })
+
+  it('does not silently render an unusable empty shelf when no active class is selected', () => {
+    getSessionBridgeStateMock.mockReturnValue({
+      activeClassId: undefined,
+      activeAppId: undefined,
+      appContext: {},
+    })
+    useApprovedChatBridgeAppsForClassMock.mockReturnValue({
+      data: [],
+      error: undefined,
+    })
+
+    renderShelf()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand ChatBridge app shelf' }))
+
+    expect(screen.getByText(/select a class/i)).toBeTruthy()
+  })
 })

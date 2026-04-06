@@ -125,7 +125,9 @@ function ChatBridgeShelfCard({ app, session, isActive }: ChatBridgeShelfCardProp
 
 export default function ChatBridgeShelf({ session }: ChatBridgeShelfProps) {
   const bridgeState = useMemo(() => getSessionBridgeState(session), [session])
-  const { data: apps = [], error } = useApprovedChatBridgeAppsForClass(bridgeState.activeClassId)
+  const { data: apps = [], error } = useApprovedChatBridgeAppsForClass(bridgeState.activeClassId || '', {
+    enabled: !!bridgeState.activeClassId,
+  })
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -149,13 +151,19 @@ export default function ChatBridgeShelf({ session }: ChatBridgeShelfProps) {
               </Text>
             </div>
           </Group>
-          <Badge size="sm" variant="light">
-            {bridgeState.activeClassId}
-          </Badge>
+          {bridgeState.activeClassId ? (
+            <Badge size="sm" variant="light">
+              {bridgeState.activeClassId}
+            </Badge>
+          ) : null}
         </Group>
 
         {expanded ? (
-          error ? (
+          !bridgeState.activeClassId ? (
+            <Alert radius="md" icon={<IconAlertCircle size={16} />} color="blue" variant="light">
+              Select a class to load ChatBridge apps for this session.
+            </Alert>
+          ) : error ? (
             <Alert radius="md" icon={<IconAlertCircle size={16} />} color="red" variant="light">
               ChatBridge apps could not be loaded from the backend right now.
             </Alert>

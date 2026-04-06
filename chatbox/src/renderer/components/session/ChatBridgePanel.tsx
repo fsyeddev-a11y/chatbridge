@@ -13,7 +13,7 @@ import {
   resolveBridgeEnvelope,
   shouldSendHeartbeatPing,
 } from '@/packages/chatbridge/panel-runtime'
-import { useChatBridgeApps } from '@/packages/chatbridge/registry'
+import { useApprovedChatBridgeAppsForClass } from '@/packages/chatbridge/registry'
 import { activateBridgeApp, closeBridgeApp, getSessionBridgeState, updateBridgeAppContext } from '@/packages/chatbridge/session'
 
 type ChatBridgePanelProps = {
@@ -28,7 +28,9 @@ export default function ChatBridgePanel({ session }: ChatBridgePanelProps) {
   const heartbeatMissesRef = useRef(0)
   const latestRuntimeStatusRef = useRef<string | undefined>(undefined)
   const bridgeState = useMemo(() => getSessionBridgeState(session), [session])
-  const { data: apps = [] } = useChatBridgeApps()
+  const { data: apps = [] } = useApprovedChatBridgeAppsForClass(bridgeState.activeClassId || '', {
+    enabled: !!bridgeState.activeClassId,
+  })
   const activeApp = useMemo(
     () => apps.find((app) => app.appId === bridgeState.activeAppId),
     [apps, bridgeState.activeAppId]

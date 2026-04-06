@@ -74,8 +74,8 @@ describe('ChatBridge registry backend client', () => {
     expect(apps).toEqual([
       expect.objectContaining({
         appId: 'chess',
-        mockMode: 'chess',
-        allowedOrigins: expect.arrayContaining(['https://apps.chatbridge.local', 'null']),
+        allowedOrigins: ['https://apps.chatbridge.local'],
+        reviewState: 'approved',
       }),
     ])
   })
@@ -123,12 +123,10 @@ describe('ChatBridge registry backend client', () => {
     ])
   })
 
-  it('falls back to the local registry when the backend is unavailable', async () => {
+  it('does not fall back to a local registry when the backend class-app request fails', async () => {
     fetchMock.mockRejectedValue(new Error('network down'))
 
-    const apps = await fetchApprovedChatBridgeAppsForClass('demo-class')
-
-    expect(apps.map((app) => app.appId).sort()).toEqual(['chess', 'google-classroom', 'weather'])
+    await expect(fetchApprovedChatBridgeAppsForClass('demo-class')).rejects.toThrow('network down')
   })
 
   it('resolves a single app by id from the fetched registry', async () => {
@@ -167,7 +165,7 @@ describe('ChatBridge registry backend client', () => {
     expect(app).toEqual(
       expect.objectContaining({
         appId: 'weather',
-        mockMode: 'weather',
+        reviewState: 'approved',
       })
     )
   })

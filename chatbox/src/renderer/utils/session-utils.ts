@@ -6,7 +6,7 @@ export function migrateSession(session: Session): Session {
   const bridgeState = session.bridgeState
     ? {
         ...session.bridgeState,
-        activeClassId: session.bridgeState.activeClassId || 'demo-class',
+        activeClassId: session.bridgeState.activeClassId,
         appContext: session.bridgeState.appContext || {},
       }
     : undefined
